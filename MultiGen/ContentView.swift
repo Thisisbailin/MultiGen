@@ -6,54 +6,384 @@
 //
 
 import SwiftUI
-import SwiftData
 
 struct ContentView: View {
-    @Environment(\.modelContext) private var modelContext
-    @Query private var items: [Item]
+    @EnvironmentObject private var configuration: AppConfiguration
+    @EnvironmentObject private var dependencies: AppDependencies
+    @EnvironmentObject private var scriptStore: ScriptStore
+    @EnvironmentObject private var storyboardStore: StoryboardStore
+    @State private var selection: SidebarItem = .home
+    @State private var showPainPointSheet = false
+    @State private var showSettingsSheet = false
+    @State private var showAIConsole = false
 
     var body: some View {
         NavigationSplitView {
-            List {
-                ForEach(items) { item in
-                    NavigationLink {
-                        Text("Item at \(item.timestamp, format: Date.FormatStyle(date: .numeric, time: .standard))")
-                    } label: {
-                        Text(item.timestamp, format: Date.FormatStyle(date: .numeric, time: .standard))
+            if showAIConsole {
+                AIChatSidebarView {
+                    showAIConsole = false
+                }
+                .environmentObject(dependencies)
+            } else {
+                List(selection: $selection) {
+                    Section {
+                        Button {
+                            showAIConsole = true
+                        } label: {
+                            Label("智能协作", systemImage: "bubble.left.and.bubble.right")
+                                .font(.headline)
+                        }
+                        .buttonStyle(.plain)
+                    }
+
+                    ForEach(SidebarItem.primaryItems) { item in
+                        Label(item.title, systemImage: item.icon)
+                            .tag(item)
+                    }
+
+                    Section("资料库") {
+                        ForEach(SidebarItem.libraryItems) { item in
+                            Label(item.title, systemImage: item.icon)
+                                .tag(item)
+                        }
                     }
                 }
-                .onDelete(perform: deleteItems)
-            }
-            .navigationSplitViewColumnWidth(min: 180, ideal: 200)
-            .toolbar {
-                ToolbarItem {
-                    Button(action: addItem) {
-                        Label("Add Item", systemImage: "plus")
-                    }
-                }
+                .listStyle(.sidebar)
             }
         } detail: {
-            Text("Select an item")
+            detailView(for: selection)
+                .toolbar {
+                    if showAIConsole == false && selection == .home {
+                        ToolbarItem(placement: .navigation) {
+                            Button {
+                                showPainPointSheet.toggle()
+                            } label: {
+                                Label("痛点说明", systemImage: "lightbulb")
+                            }
+                            .help("查看 AIGC 场景创作现状与解决策略")
+                        }
+                        ToolbarItem(placement: .status) {
+                            Group {
+                                if configuration.useMock {
+                                    Label("Mock 模式", systemImage: "wand.and.stars")
+                                        .foregroundStyle(.orange)
+                                } else {
+                                    VStack(alignment: .leading, spacing: 2) {
+                                        Label("文本：\(configuration.textModel.displayName)", systemImage: "text.book.closed")
+                                        Label("图像：\(configuration.imageModel.displayName)", systemImage: "photo.on.rectangle")
+                                    }
+                                    .labelStyle(.titleAndIcon)
+                                }
+                            }
+                            .padding(.horizontal, 8)
+                            .padding(.vertical, 4)
+                            .background(
+                                Capsule(style: .continuous)
+                                    .fill(Color.primary.opacity(0.08))
+                            )
+                        }
+                        ToolbarItem(placement: .primaryAction) {
+                            Button {
+                                showSettingsSheet.toggle()
+                            } label: {
+                                Label("设置", systemImage: "slider.horizontal.3")
+                            }
+                            .help("打开 Gemini 设置与密钥管理")
+                        }
+                    }
+                }
+                .sheet(isPresented: $showPainPointSheet) {
+                    PainPointSheetView(painPoints: PainPointCatalog.corePainPoints)
+                        .frame(minWidth: 520, minHeight: 420)
+                }
+                .sheet(isPresented: $showSettingsSheet) {
+                    SettingsView()
+                        .frame(minWidth: 520, minHeight: 500)
+                }
+        }
+        .toolbarBackground(.hidden, for: .automatic)
+        .task { }
+    }
+
+    @ViewBuilder
+    private func detailView(for item: SidebarItem) -> some View {
+        switch item {
+        case .home:
+            ScenarioOverviewView(
+                painPoints: PainPointCatalog.corePainPoints,
+                actions: SceneAction.allCases
+            )
+            .navigationTitle("MultiGen 控制台")
+        case .script:
+            ScriptView()
+                .navigationTitle("剧本")
+        case .storyboard:
+            StoryboardScreen {
+                StoryboardDialogueStore(
+                    scriptStore: scriptStore,
+                    storyboardStore: storyboardStore,
+                    dependencies: dependencies
+                )
+            }
+                .navigationTitle("分镜")
+        case .image:
+            CreateScreen {
+                CreateStore(
+                    storyboardStore: storyboardStore,
+                    dependencies: dependencies
+                )
+            }
+                .navigationTitle("影像")
+        case .libraryCharacters, .libraryScenes, .libraryPrompts:
+            LibraryPlaceholderView(title: item.title)
         }
     }
 
-    private func addItem() {
-        withAnimation {
-            let newItem = Item(timestamp: Date())
-            modelContext.insert(newItem)
+}
+
+private enum SidebarItem: String, Identifiable {
+    case home
+    case script
+    case storyboard
+    case image
+    case libraryCharacters
+    case libraryScenes
+    case libraryPrompts
+
+    static let primaryItems: [SidebarItem] = [.home, .script, .storyboard, .image]
+    static let libraryItems: [SidebarItem] = [.libraryCharacters, .libraryScenes, .libraryPrompts]
+
+    var id: String { rawValue }
+
+    var title: String {
+        switch self {
+        case .home: return "主页"
+        case .script: return "剧本"
+        case .storyboard: return "分镜"
+        case .image: return "影像"
+        case .libraryCharacters: return "角色"
+        case .libraryScenes: return "场景"
+        case .libraryPrompts: return "指令"
         }
     }
 
-    private func deleteItems(offsets: IndexSet) {
-        withAnimation {
-            for index in offsets {
-                modelContext.delete(items[index])
+    var icon: String {
+        switch self {
+        case .home: return "house"
+        case .script: return "book.pages"
+        case .storyboard: return "rectangle.3.offgrid"
+        case .image: return "sparkles"
+        case .libraryCharacters: return "person.crop.square"
+        case .libraryScenes: return "square.grid.3x3"
+        case .libraryPrompts: return "text.quote"
+        }
+    }
+}
+
+private struct PainPointSheetView: View {
+    let painPoints: [PainPoint]
+    @Environment(\.dismiss) private var dismiss
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 20) {
+            HStack {
+                VStack(alignment: .leading, spacing: 4) {
+                    Text("AIGC 场景创作痛点")
+                        .font(.system(.title, weight: .semibold))
+                    Text("遵循 macOS 26 设计指南，痛点说明作为随时可调用的辅助视图，帮助用户在开始配置前理解 MultiGen 的价值。")
+                        .foregroundStyle(.secondary)
+                }
+                Spacer()
+                Button {
+                    dismiss()
+                } label: {
+                    Image(systemName: "xmark.circle.fill")
+                        .font(.title2)
+                }
+                .buttonStyle(.plain)
+                .accessibilityLabel("关闭")
+            }
+            Divider()
+            ScrollView {
+                VStack(spacing: 12) {
+                    ForEach(painPoints) { point in
+                        PainPointRow(painPoint: point)
+                            .background(
+                                RoundedRectangle(cornerRadius: 12, style: .continuous)
+                                    .fill(Color(nsColor: NSColor.controlBackgroundColor))
+                            )
+                    }
+                }
+            }
+        }
+        .padding(24)
+    }
+}
+
+private struct LibraryPlaceholderView: View {
+    let title: String
+
+    var body: some View {
+        VStack(spacing: 12) {
+            Text(title)
+                .font(.largeTitle.bold())
+            Text("资料库模块敬请期待：未来将在此管理 \(title) 资产，并与影像创作流程联动。")
+                .multilineTextAlignment(.center)
+                .foregroundStyle(.secondary)
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+    }
+}
+
+private struct AIChatSidebarView: View {
+    @EnvironmentObject private var dependencies: AppDependencies
+    @State private var messages: [AIChatMessage] = [
+        AIChatMessage(role: .assistant, text: "你好，我是 MultiGen 的智能协作者。告诉我你想要讨论的内容吧！")
+    ]
+    @State private var inputText: String = ""
+    @State private var isSending = false
+    @State private var errorMessage: String?
+    @FocusState private var isTextFocused: Bool
+    let onExit: () -> Void
+
+    var body: some View {
+        VStack(spacing: 8) {
+            HStack {
+                Label("智能协作", systemImage: "sparkles")
+                    .font(.headline)
+                Spacer()
+                Button(action: onExit) {
+                    Image(systemName: "sidebar.left")
+                }
+                .buttonStyle(.plain)
+                .help("返回项目列表")
+            }
+            ScrollViewReader { proxy in
+                ScrollView {
+                    LazyVStack(alignment: .leading, spacing: 12) {
+                        ForEach(messages) { message in
+                            ChatBubble(message: message)
+                                .id(message.id)
+                        }
+                    }
+                    .padding(20)
+                }
+                .onChange(of: messages.count) { _, _ in
+                    if let last = messages.last {
+                        proxy.scrollTo(last.id, anchor: .bottom)
+                    }
+                }
+            }
+
+            VStack(alignment: .leading, spacing: 6) {
+                if let errorMessage {
+                    Text(errorMessage)
+                        .font(.caption)
+                        .foregroundStyle(.red)
+                } else {
+                    Text("当前模型：\(dependencies.configuration.textModel.displayName)")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+                HStack(spacing: 12) {
+                    TextField("向 Gemini 描述你的需求…", text: $inputText, axis: .vertical)
+                        .textFieldStyle(.roundedBorder)
+                        .focused($isTextFocused)
+                        .disabled(isSending)
+
+                    Button {
+                        sendMessage()
+                    } label: {
+                        if isSending {
+                            ProgressView()
+                                .progressViewStyle(.circular)
+                        } else {
+                            Image(systemName: "paperplane.fill")
+                        }
+                    }
+                    .buttonStyle(.borderedProminent)
+                    .disabled(isSending || inputText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+                }
+            }
+            .padding(12)
+            .background(
+                RoundedRectangle(cornerRadius: 10)
+                    .fill(Color(nsColor: .underPageBackgroundColor))
+            )
+        }
+        .padding(10)
+    }
+
+    private func sendMessage() {
+        let trimmed = inputText.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard trimmed.isEmpty == false else { return }
+
+        let userMessage = AIChatMessage(role: .user, text: trimmed)
+        messages.append(userMessage)
+        inputText = ""
+        errorMessage = nil
+        isSending = true
+
+        Task {
+            defer { isSending = false }
+            do {
+                let request = SceneJobRequest(
+                    action: .generateScene,
+                    fields: ["prompt": trimmed],
+                    channel: .text
+                )
+                let result = try await dependencies.textService().submit(job: request)
+                let reply = AIChatMessage(role: .assistant, text: result.metadata.prompt)
+                await MainActor.run {
+                    messages.append(reply)
+                }
+            } catch {
+                await MainActor.run {
+                    errorMessage = error.localizedDescription
+                }
             }
         }
     }
 }
 
-#Preview {
-    ContentView()
-        .modelContainer(for: Item.self, inMemory: true)
+private struct ChatBubble: View {
+    let message: AIChatMessage
+
+    var body: some View {
+        HStack {
+            if message.role == .assistant { Spacer(minLength: 0) }
+            VStack(alignment: .leading, spacing: 4) {
+                Text(message.role.displayName)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                Text(message.text)
+                    .font(.body)
+            .foregroundStyle(message.role == .assistant ? .primary : Color.white)
+            }
+            .padding(12)
+            .background(
+                RoundedRectangle(cornerRadius: 16, style: .continuous)
+                    .fill(message.role == .assistant ? Color(nsColor: .controlBackgroundColor) : Color.accentColor)
+            )
+            if message.role == .user { Spacer(minLength: 0) }
+        }
+    }
+}
+
+private struct AIChatMessage: Identifiable {
+    enum Role {
+        case user
+        case assistant
+
+        var displayName: String {
+            switch self {
+            case .user: return "我"
+            case .assistant: return "Gemini"
+            }
+        }
+    }
+
+    let id = UUID()
+    let role: Role
+    let text: String
 }

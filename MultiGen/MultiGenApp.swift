@@ -6,27 +6,20 @@
 //
 
 import SwiftUI
-import SwiftData
 
 @main
 struct MultiGenApp: App {
-    var sharedModelContainer: ModelContainer = {
-        let schema = Schema([
-            Item.self,
-        ])
-        let modelConfiguration = ModelConfiguration(schema: schema, isStoredInMemoryOnly: false)
-
-        do {
-            return try ModelContainer(for: schema, configurations: [modelConfiguration])
-        } catch {
-            fatalError("Could not create ModelContainer: \(error)")
-        }
-    }()
+    @StateObject private var dependencies = AppDependencies.live()
+    @StateObject private var scriptStore = ScriptStore()
+    @StateObject private var storyboardStore = StoryboardStore()
 
     var body: some Scene {
         WindowGroup {
             ContentView()
+                .environmentObject(dependencies)
+                .environmentObject(dependencies.configuration)
+                .environmentObject(scriptStore)
+                .environmentObject(storyboardStore)
         }
-        .modelContainer(sharedModelContainer)
     }
 }
