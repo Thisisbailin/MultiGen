@@ -106,12 +106,7 @@ struct ContentView: View {
             }
                 .navigationTitle("分镜")
         case .image:
-            CreateScreen {
-                CreateStore(
-                    storyboardStore: storyboardStore,
-                    dependencies: dependencies
-                )
-            }
+            ImagingPlaceholderView()
                 .navigationTitle("影像")
         case .libraryCharacters, .libraryScenes, .libraryPrompts:
             if item == .libraryPrompts {
