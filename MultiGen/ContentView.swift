@@ -13,16 +13,12 @@ struct ContentView: View {
     @EnvironmentObject private var scriptStore: ScriptStore
     @EnvironmentObject private var storyboardStore: StoryboardStore
     @EnvironmentObject private var promptLibraryStore: PromptLibraryStore
-    @State private var selection: SidebarItem = .home
-    @State private var showPainPointSheet = false
-    @State private var showSettingsSheet = false
-    @State private var sidebarMode: SidebarMode = .projects
-    @State private var columnVisibility: NavigationSplitViewVisibility = .all
+    @EnvironmentObject private var navigationStore: NavigationStore
 
     var body: some View {
-        NavigationSplitView(columnVisibility: $columnVisibility) {
+        NavigationSplitView(columnVisibility: $navigationStore.columnVisibility) {
             VStack(spacing: 12) {
-                Picker("", selection: $sidebarMode) {
+                Picker("", selection: $navigationStore.sidebarMode) {
                     Image(systemName: "square.grid.2x2")
                         .tag(SidebarMode.projects)
                     Image(systemName: "bubble.left.and.bubble.right")
@@ -31,8 +27,8 @@ struct ContentView: View {
                 .pickerStyle(.segmented)
                 .labelsHidden()
 
-                if sidebarMode == .projects {
-                    SidebarProjectList(selection: $selection)
+                if navigationStore.sidebarMode == .projects {
+                    SidebarProjectList(selection: $navigationStore.selection)
                 } else {
                     AIChatSidebarView()
                         .environmentObject(dependencies)
@@ -41,12 +37,12 @@ struct ContentView: View {
             }
             .padding(12)
         } detail: {
-            detailView(for: selection)
+            detailView(for: navigationStore.selection)
                 .toolbar {
-                    if selection == .home {
+                    if navigationStore.selection == .home {
                         ToolbarItem(placement: .navigation) {
                             Button {
-                                showPainPointSheet.toggle()
+                                navigationStore.showPainPointSheet.toggle()
                             } label: {
                                 Label("痛点说明", systemImage: "lightbulb")
                             }
@@ -74,7 +70,7 @@ struct ContentView: View {
                         }
                         ToolbarItem(placement: .primaryAction) {
                             Button {
-                                showSettingsSheet.toggle()
+                                navigationStore.showSettingsSheet.toggle()
                             } label: {
                                 Label("设置", systemImage: "slider.horizontal.3")
                             }
@@ -82,11 +78,11 @@ struct ContentView: View {
                         }
                     }
                 }
-                .sheet(isPresented: $showPainPointSheet) {
+                .sheet(isPresented: $navigationStore.showPainPointSheet) {
                     PainPointSheetView(painPoints: PainPointCatalog.corePainPoints)
                         .frame(minWidth: 520, minHeight: 420)
                 }
-                .sheet(isPresented: $showSettingsSheet) {
+                .sheet(isPresented: $navigationStore.showSettingsSheet) {
                     SettingsView()
                         .frame(minWidth: 520, minHeight: 500)
                 }
@@ -180,6 +176,15 @@ enum SidebarItem: String, Identifiable {
 enum SidebarMode: String, CaseIterable {
     case projects
     case ai
+}
+
+@MainActor
+final class NavigationStore: ObservableObject {
+    @Published var sidebarMode: SidebarMode = .projects
+    @Published var selection: SidebarItem = .home
+    @Published var columnVisibility: NavigationSplitViewVisibility = .all
+    @Published var showPainPointSheet = false
+    @Published var showSettingsSheet = false
 }
 
 private struct PainPointSheetView: View {
