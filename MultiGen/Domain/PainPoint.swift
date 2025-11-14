@@ -29,6 +29,7 @@ public enum SceneAction: String, CaseIterable, Identifiable, Codable, Sendable {
     case createCharacter
     case editCharacter
     case blendCharacterAndScene
+    case aiConsole
 
     public var id: String { rawValue }
 
@@ -40,6 +41,7 @@ public enum SceneAction: String, CaseIterable, Identifiable, Codable, Sendable {
         case .createCharacter: return "生成角色"
         case .editCharacter: return "角色编辑"
         case .blendCharacterAndScene: return "人与场景溶图"
+        case .aiConsole: return "智能协作"
         }
     }
 
@@ -51,7 +53,12 @@ public enum SceneAction: String, CaseIterable, Identifiable, Codable, Sendable {
         case .createCharacter: return "person.crop.square"
         case .editCharacter: return "paintbrush.pointed"
         case .blendCharacterAndScene: return "person.2.square.stack"
+        case .aiConsole: return "bubble.left.and.bubble.right"
         }
+    }
+
+    public static var workflowActions: [SceneAction] {
+        [.generateScene, .enhanceDetails, .perspectiveShift, .createCharacter, .editCharacter, .blendCharacterAndScene]
     }
 }
 

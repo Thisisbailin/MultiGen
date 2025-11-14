@@ -32,6 +32,7 @@ final class StoryboardDialogueStore: ObservableObject {
 
     private let scriptStore: ScriptStore
     private let storyboardStore: StoryboardStore
+    private let promptLibraryStore: PromptLibraryStore
     private let dependencies: AppDependencies
     private let parser = StoryboardResponseParser()
     private var cancellables: Set<AnyCancellable> = []
@@ -39,10 +40,12 @@ final class StoryboardDialogueStore: ObservableObject {
     init(
         scriptStore: ScriptStore,
         storyboardStore: StoryboardStore,
+        promptLibraryStore: PromptLibraryStore,
         dependencies: AppDependencies
     ) {
         self.scriptStore = scriptStore
         self.storyboardStore = storyboardStore
+        self.promptLibraryStore = promptLibraryStore
         self.dependencies = dependencies
 
         episodes = scriptStore.episodes
@@ -114,6 +117,10 @@ final class StoryboardDialogueStore: ObservableObject {
             return "\(provider) · \(model)"
         }
         return "Gemini · 官方线路"
+    }
+
+    private var storyboardSystemPrompt: String {
+        promptLibraryStore.document(for: .storyboard).content
     }
 
     func selectEpisode(id: UUID?) {
@@ -360,6 +367,10 @@ final class StoryboardDialogueStore: ObservableObject {
             if scene.summary.isEmpty == false {
                 fields["sceneSummary"] = scene.summary
             }
+        }
+        let prompt = storyboardSystemPrompt.trimmingCharacters(in: .whitespacesAndNewlines)
+        if prompt.isEmpty == false {
+            fields["systemPrompt"] = prompt
         }
 
         let request = SceneJobRequest(

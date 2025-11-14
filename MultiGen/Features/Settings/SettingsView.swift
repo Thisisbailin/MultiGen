@@ -180,18 +180,28 @@ struct SettingsView: View {
         }
         .padding(24)
         .onAppear(perform: loadState)
-        .onChange(of: selectedTextModel) { configuration.updateTextModel($0) }
-        .onChange(of: selectedImageModel) { configuration.updateImageModel($0) }
-        .onChange(of: useMock) { configuration.updateUseMock($0) }
-        .onChange(of: relayEnabled) { configuration.updateRelayEnabled($0) }
-        .onChange(of: relayProviderName) { configuration.updateRelayProvider(name: $0) }
-        .onChange(of: relayBaseURL) { _ in
+        .onChange(of: selectedTextModel) { _, newValue in
+            configuration.updateTextModel(newValue)
+        }
+        .onChange(of: selectedImageModel) { _, newValue in
+            configuration.updateImageModel(newValue)
+        }
+        .onChange(of: useMock) { _, newValue in
+            configuration.updateUseMock(newValue)
+        }
+        .onChange(of: relayEnabled) { _, newValue in
+            configuration.updateRelayEnabled(newValue)
+        }
+        .onChange(of: relayProviderName) { _, newValue in
+            configuration.updateRelayProvider(name: newValue)
+        }
+        .onChange(of: relayBaseURL) { _, _ in
             configuration.updateRelayEndpoint(baseURL: relayBaseURL, apiKey: relayAPIKey)
         }
-        .onChange(of: relayAPIKey) { _ in
+        .onChange(of: relayAPIKey) { _, _ in
             configuration.updateRelayEndpoint(baseURL: relayBaseURL, apiKey: relayAPIKey)
         }
-        .onChange(of: relaySelectedModel) { newValue in
+        .onChange(of: relaySelectedModel) { _, newValue in
             configuration.updateRelaySelectedModel(newValue.isEmpty ? nil : newValue)
         }
     }
@@ -263,7 +273,7 @@ struct SettingsView: View {
         feedbackColor = .secondary
 
         let request = SceneJobRequest(
-            action: .generateScene,
+            action: .aiConsole,
             fields: [
                 "theme": "连接测试",
                 "mood": "系统检测",
@@ -299,7 +309,7 @@ struct SettingsView: View {
         textTestResponse = ""
 
         let request = SceneJobRequest(
-            action: .generateScene,
+            action: .aiConsole,
             fields: ["prompt": textTestInput],
             channel: .text
         )

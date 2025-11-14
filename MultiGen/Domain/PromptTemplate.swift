@@ -126,6 +126,13 @@ public enum PromptTemplateCatalog {
                 ],
                 systemHint: "生成的画面需要突出人物与环境的呼应关系。"
             )
+        case .aiConsole:
+            return PromptTemplate(
+                id: action,
+                summary: "自由对话，默认不附带指令，可在资料库自定义。",
+                fields: [],
+                systemHint: ""
+            )
         }
     }
 }

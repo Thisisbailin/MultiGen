@@ -12,48 +12,38 @@ struct ContentView: View {
     @EnvironmentObject private var dependencies: AppDependencies
     @EnvironmentObject private var scriptStore: ScriptStore
     @EnvironmentObject private var storyboardStore: StoryboardStore
+    @EnvironmentObject private var promptLibraryStore: PromptLibraryStore
     @State private var selection: SidebarItem = .home
     @State private var showPainPointSheet = false
     @State private var showSettingsSheet = false
-    @State private var showAIConsole = false
+    @State private var sidebarMode: SidebarMode = .projects
+    @State private var columnVisibility: NavigationSplitViewVisibility = .all
 
     var body: some View {
-        NavigationSplitView {
-            if showAIConsole {
-                AIChatSidebarView {
-                    showAIConsole = false
+        NavigationSplitView(columnVisibility: $columnVisibility) {
+            VStack(spacing: 12) {
+                Picker("", selection: $sidebarMode) {
+                    Image(systemName: "square.grid.2x2")
+                        .tag(SidebarMode.projects)
+                    Image(systemName: "bubble.left.and.bubble.right")
+                        .tag(SidebarMode.ai)
                 }
-                .environmentObject(dependencies)
-            } else {
-                List(selection: $selection) {
-                    Section {
-                        Button {
-                            showAIConsole = true
-                        } label: {
-                            Label("智能协作", systemImage: "bubble.left.and.bubble.right")
-                                .font(.headline)
-                        }
-                        .buttonStyle(.plain)
-                    }
+                .pickerStyle(.segmented)
+                .labelsHidden()
 
-                    ForEach(SidebarItem.primaryItems) { item in
-                        Label(item.title, systemImage: item.icon)
-                            .tag(item)
-                    }
-
-                    Section("资料库") {
-                        ForEach(SidebarItem.libraryItems) { item in
-                            Label(item.title, systemImage: item.icon)
-                                .tag(item)
-                        }
-                    }
+                if sidebarMode == .projects {
+                    SidebarProjectList(selection: $selection)
+                } else {
+                    AIChatSidebarView()
+                        .environmentObject(dependencies)
+                        .environmentObject(promptLibraryStore)
                 }
-                .listStyle(.sidebar)
             }
+            .padding(12)
         } detail: {
             detailView(for: selection)
                 .toolbar {
-                    if showAIConsole == false && selection == .home {
+                    if selection == .home {
                         ToolbarItem(placement: .navigation) {
                             Button {
                                 showPainPointSheet.toggle()
@@ -111,7 +101,7 @@ struct ContentView: View {
         case .home:
             ScenarioOverviewView(
                 painPoints: PainPointCatalog.corePainPoints,
-                actions: SceneAction.allCases
+                actions: SceneAction.workflowActions
             )
             .navigationTitle("MultiGen 控制台")
         case .script:
@@ -122,6 +112,7 @@ struct ContentView: View {
                 StoryboardDialogueStore(
                     scriptStore: scriptStore,
                     storyboardStore: storyboardStore,
+                    promptLibraryStore: promptLibraryStore,
                     dependencies: dependencies
                 )
             }
@@ -135,13 +126,19 @@ struct ContentView: View {
             }
                 .navigationTitle("影像")
         case .libraryCharacters, .libraryScenes, .libraryPrompts:
-            LibraryPlaceholderView(title: item.title)
+            if item == .libraryPrompts {
+                PromptLibraryView()
+                    .environmentObject(promptLibraryStore)
+                    .navigationTitle("指令资料库")
+            } else {
+                LibraryPlaceholderView(title: item.title)
+            }
         }
     }
 
 }
 
-private enum SidebarItem: String, Identifiable {
+enum SidebarItem: String, Identifiable {
     case home
     case script
     case storyboard
@@ -178,6 +175,11 @@ private enum SidebarItem: String, Identifiable {
         case .libraryPrompts: return "text.quote"
         }
     }
+}
+
+enum SidebarMode: String, CaseIterable {
+    case projects
+    case ai
 }
 
 private struct PainPointSheetView: View {
@@ -237,6 +239,7 @@ private struct LibraryPlaceholderView: View {
 
 private struct AIChatSidebarView: View {
     @EnvironmentObject private var dependencies: AppDependencies
+    @EnvironmentObject private var promptLibraryStore: PromptLibraryStore
     @State private var messages: [AIChatMessage] = [
         AIChatMessage(role: .assistant, text: "你好，我是 MultiGen 的智能协作者。告诉我你想要讨论的内容吧！")
     ]
@@ -244,20 +247,11 @@ private struct AIChatSidebarView: View {
     @State private var isSending = false
     @State private var errorMessage: String?
     @FocusState private var isTextFocused: Bool
-    let onExit: () -> Void
 
     var body: some View {
         VStack(spacing: 8) {
-            HStack {
-                Label("智能协作", systemImage: "sparkles")
-                    .font(.headline)
-                Spacer()
-                Button(action: onExit) {
-                    Image(systemName: "sidebar.left")
-                }
-                .buttonStyle(.plain)
-                .help("返回项目列表")
-            }
+            Label("智能协作", systemImage: "sparkles")
+                .font(.headline)
             ScrollViewReader { proxy in
                 ScrollView {
                     LazyVStack(alignment: .leading, spacing: 12) {
@@ -327,9 +321,15 @@ private struct AIChatSidebarView: View {
         Task {
             defer { isSending = false }
             do {
+                var fields: [String: String] = ["prompt": trimmed]
+                let systemPrompt = promptLibraryStore.document(for: .aiConsole).content
+                    .trimmingCharacters(in: .whitespacesAndNewlines)
+                if systemPrompt.isEmpty == false {
+                    fields["systemPrompt"] = systemPrompt
+                }
                 let request = SceneJobRequest(
-                    action: .generateScene,
-                    fields: ["prompt": trimmed],
+                    action: .aiConsole,
+                    fields: fields,
                     channel: .text
                 )
                 let result = try await dependencies.textService().submit(job: request)

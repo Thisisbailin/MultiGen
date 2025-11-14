@@ -12,6 +12,7 @@ struct MultiGenApp: App {
     @StateObject private var dependencies = AppDependencies.live()
     @StateObject private var scriptStore = ScriptStore()
     @StateObject private var storyboardStore = StoryboardStore()
+    @StateObject private var promptLibraryStore = PromptLibraryStore()
 
     var body: some Scene {
         WindowGroup {
@@ -20,6 +21,7 @@ struct MultiGenApp: App {
                 .environmentObject(dependencies.configuration)
                 .environmentObject(scriptStore)
                 .environmentObject(storyboardStore)
+                .environmentObject(promptLibraryStore)
         }
     }
 }
