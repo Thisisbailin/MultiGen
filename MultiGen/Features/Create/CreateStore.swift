@@ -106,9 +106,6 @@ final class CreateStore: ObservableObject {
 
     var currentRouteDescription: String {
         let config = dependencies.configuration
-        if config.useMock {
-            return "Mock · 本地模拟"
-        }
         if config.relayEnabled {
             let provider = config.relayProviderName.isEmpty ? "中转" : config.relayProviderName
             let model = config.relaySelectedModel ?? "未选模型"

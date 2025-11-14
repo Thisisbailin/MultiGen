@@ -9,6 +9,12 @@ import Foundation
 
 /// 解析 AI 返回的分镜 JSON 文本，并提供格式提示。
 struct StoryboardResponseParser {
+    struct ParsedStoryboardEntry {
+        var fields: StoryboardEntryFields
+        var sceneTitle: String?
+        var sceneSummary: String?
+    }
+
     struct EntryPayload: Decodable {
         var shotNumber: Int?
         var shot: Int?
@@ -53,11 +59,38 @@ struct StoryboardResponseParser {
         let entries: [EntryPayload]
     }
 
+    struct ScenePayload: Decodable {
+        var sceneTitle: String?
+        var scene: String?
+        var title: String?
+        var sceneSummary: String?
+        var summary: String?
+        var overview: String?
+        var shots: [EntryPayload]?
+        var entries: [EntryPayload]?
+
+        var resolvedTitle: String? {
+            sceneTitle ?? scene ?? title
+        }
+
+        var resolvedSummary: String? {
+            sceneSummary ?? summary ?? overview
+        }
+
+        var resolvedEntries: [EntryPayload] {
+            shots ?? entries ?? []
+        }
+    }
+
+    struct SceneEnvelope: Decodable {
+        let scenes: [ScenePayload]
+    }
+
     static let responseFormatHint = """
     请以 JSON 输出，形如 {"entries":[{"shotNumber":1,"shotScale":"中景","cameraMovement":"推镜","duration":"4s","dialogue":"……","aiPrompt":"……"}]}，字段必须完整且使用双引号。
     """
 
-    func parseEntries(from text: String, nextShotNumber: Int) -> [StoryboardEntryFields] {
+    func parseEntries(from text: String, nextShotNumber: Int) -> [ParsedStoryboardEntry] {
         guard let jsonString = extractJSON(from: text),
               let data = jsonString.data(using: .utf8) else {
             return []
@@ -66,27 +99,59 @@ struct StoryboardResponseParser {
         let decoder = JSONDecoder()
         decoder.keyDecodingStrategy = .convertFromSnakeCase
 
-        let payloads: [EntryPayload]
-        if let envelope = try? decoder.decode(ResponseEnvelope.self, from: data) {
-            payloads = envelope.entries
+        if let sceneEnvelope = try? decoder.decode(SceneEnvelope.self, from: data) {
+            return flattenScenes(sceneEnvelope.scenes, startingShot: nextShotNumber)
+        } else if let envelope = try? decoder.decode(ResponseEnvelope.self, from: data) {
+            return flatten(entries: envelope.entries, sceneTitle: nil, sceneSummary: nil, startingShot: nextShotNumber)
         } else if let arrayPayload = try? decoder.decode([EntryPayload].self, from: data) {
-            payloads = arrayPayload
+            return flatten(entries: arrayPayload, sceneTitle: nil, sceneSummary: nil, startingShot: nextShotNumber)
         } else {
             return []
         }
+    }
 
-        var resolved: [StoryboardEntryFields] = []
-        var currentShot = max(nextShotNumber, 1)
+    private func flattenScenes(_ scenes: [ScenePayload], startingShot: Int) -> [ParsedStoryboardEntry] {
+        var all: [ParsedStoryboardEntry] = []
+        var currentShot = max(startingShot, 1)
+        for scene in scenes {
+            let sceneEntries = flatten(
+                entries: scene.resolvedEntries,
+                sceneTitle: scene.resolvedTitle,
+                sceneSummary: scene.resolvedSummary,
+                startingShot: currentShot
+            )
+            if let lastShot = sceneEntries.map(\.fields.shotNumber).max() {
+                currentShot = lastShot + 1
+            }
+            all.append(contentsOf: sceneEntries)
+        }
+        return all
+    }
 
-        for payload in payloads {
+    private func flatten(
+        entries: [EntryPayload],
+        sceneTitle: String?,
+        sceneSummary: String?,
+        startingShot: Int
+    ) -> [ParsedStoryboardEntry] {
+        guard entries.isEmpty == false else { return [] }
+        var resolved: [ParsedStoryboardEntry] = []
+        var currentShot = max(startingShot, 1)
+
+        for payload in entries {
             var fields = payload.makeFields(defaultShotNumber: currentShot)
             if fields.shotNumber <= 0 {
                 fields.shotNumber = currentShot
             }
             currentShot = fields.shotNumber + 1
-            resolved.append(fields)
+            resolved.append(
+                ParsedStoryboardEntry(
+                    fields: fields,
+                    sceneTitle: sceneTitle,
+                    sceneSummary: sceneSummary
+                )
+            )
         }
-
         return resolved
     }
 
@@ -122,7 +187,7 @@ struct StoryboardResponseParser {
     }
 
     private func extractFencedJSON(from text: String) -> String? {
-        guard let fenceStart = text.range(of: "```json") else { return nil }
+        guard let fenceStart = text.range(of: "```json") ?? text.range(of: "```JSON") ?? text.range(of: "```") else { return nil }
         let remainder = text[fenceStart.upperBound...]
         guard let fenceEnd = remainder.range(of: "```") else { return nil }
         return String(remainder[..<fenceEnd.lowerBound]).trimmingCharacters(in: .whitespacesAndNewlines)

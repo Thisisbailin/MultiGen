@@ -8,6 +8,7 @@
 import SwiftUI
 
 struct StoryboardView: View {
+    @EnvironmentObject private var navigationStore: NavigationStore
     @StateObject private var store: StoryboardDialogueStore
     @State private var exportErrorMessage: String?
 
@@ -16,28 +17,17 @@ struct StoryboardView: View {
     }
 
     var body: some View {
-        ZStack(alignment: .bottom) {
-            ScrollView {
-                VStack(alignment: .leading, spacing: 18) {
-                    selectionSummary
+        ScrollView {
+            VStack(alignment: .leading, spacing: 18) {
+                selectionSummary
 
-                    if let banner = store.bannerMessage {
-                        InfoBanner(text: banner)
-                    }
-
-                    currentSceneSection
+                if let banner = store.bannerMessage {
+                    InfoBanner(text: banner)
                 }
-                .padding(24)
-                .padding(.bottom, 220)
-            }
 
-            HStack {
-                Spacer()
-                aiComposerSection
-                Spacer()
+                currentSceneSection
             }
-            .padding(.horizontal, 24)
-            .padding(.bottom, 18)
+            .padding(24)
         }
         .background(Color(nsColor: .windowBackgroundColor))
         .toolbar(content: toolbarContent)
@@ -56,6 +46,21 @@ struct StoryboardView: View {
             Button("确定", role: .cancel) { exportErrorMessage = nil }
         } message: {
             Text(exportErrorMessage ?? "")
+        }
+        .onAppear {
+            navigationStore.currentStoryboardEpisodeID = store.selectedEpisodeID
+            navigationStore.storyboardAutomationHandler = store
+        }
+        .onReceive(store.$selectedEpisode) { episode in
+            navigationStore.currentStoryboardEpisodeID = episode?.id
+        }
+        .onDisappear {
+            if navigationStore.selection != .storyboard {
+                navigationStore.currentStoryboardEpisodeID = nil
+            }
+            if navigationStore.storyboardAutomationHandler === store {
+                navigationStore.storyboardAutomationHandler = nil
+            }
         }
     }
 
@@ -99,13 +104,23 @@ struct StoryboardView: View {
                                 .foregroundStyle(.secondary)
                         }
                         Spacer()
-                        Button {
-                            selectNextScene()
-                        } label: {
-                            Label("下一个场景", systemImage: "arrow.forward.circle")
+                        HStack(spacing: 8) {
+                            Button {
+                                store.createManualEntry()
+                            } label: {
+                                Label("新增镜头", systemImage: "plus.square.on.square")
+                            }
+                            .buttonStyle(.bordered)
+                            .disabled(store.selectedEpisode == nil)
+
+                            Button {
+                                selectNextScene()
+                            } label: {
+                                Label("下一个场景", systemImage: "arrow.forward.circle")
+                            }
+                            .buttonStyle(.bordered)
+                            .disabled(store.scenes.count <= 1)
                         }
-                        .buttonStyle(.bordered)
-                        .disabled(store.scenes.count <= 1)
                     }
                     Divider()
                     VStack(spacing: 14) {
@@ -134,69 +149,6 @@ struct StoryboardView: View {
                 placeholder("暂无场景。请先通过 AI 生成或点击“新增分镜”创建首个镜头。")
             }
         }
-    }
-
-    private var aiComposerSection: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            HStack {
-                Label("AI 分镜助手", systemImage: "wand.and.stars")
-                    .font(.headline)
-                Spacer()
-                if store.isGenerating {
-                    ProgressView()
-                        .progressViewStyle(.circular)
-                }
-            }
-
-            VStack(alignment: .leading, spacing: 8) {
-                TextField("描述新增镜头或对当前镜头的调整…", text: $store.messageText, axis: .vertical)
-                    .textFieldStyle(.roundedBorder)
-                HStack(spacing: 8) {
-                    OptionTag(title: "提示词模版", isOn: store.includePromptHint) {
-                        store.includePromptHint.toggle()
-                    }
-                    OptionTag(title: "剧本摘要", isOn: store.includeScriptContext) {
-                        store.includeScriptContext.toggle()
-                    }
-                    OptionTag(title: "分镜上下文", isOn: store.includeStoryboardContext) {
-                        store.includeStoryboardContext.toggle()
-                    }
-                }
-            }
-
-            HStack(spacing: 12) {
-                Button {
-                    store.sendMessage()
-                } label: {
-                    Label("发送 AI", systemImage: "paperplane.fill")
-                }
-                .buttonStyle(.borderedProminent)
-                .disabled(store.canSend == false)
-
-                Button {
-                    store.createManualEntry()
-                } label: {
-                    Label("新增镜头", systemImage: "plus.square.on.square")
-                }
-                .buttonStyle(.bordered)
-                .disabled(store.selectedEpisode == nil)
-
-                Spacer()
-                VStack(alignment: .trailing, spacing: 2) {
-                    Text("模型：\(store.currentModelDisplayName)")
-                    Text("线路：\(store.currentRouteDescription)")
-                }
-                .font(.caption)
-                .foregroundStyle(.secondary)
-            }
-        }
-        .padding(20)
-        .background(
-            RoundedRectangle(cornerRadius: 22, style: .continuous)
-                .fill(Color(nsColor: .windowBackgroundColor))
-                .shadow(color: .black.opacity(0.12), radius: 20, y: 10)
-        )
-        .frame(maxWidth: 800)
     }
 
     private func toolbarContent() -> some ToolbarContent {
@@ -452,27 +404,5 @@ struct StoryboardScreen: View {
 
     var body: some View {
         StoryboardView(store: store)
-    }
-}
-private struct OptionTag: View {
-    let title: String
-    let isOn: Bool
-    let action: () -> Void
-
-    var body: some View {
-        Button(action: action) {
-            HStack(spacing: 6) {
-                Image(systemName: isOn ? "checkmark.circle.fill" : "circle")
-                Text(title)
-            }
-            .font(.caption)
-            .padding(.horizontal, 10)
-            .padding(.vertical, 6)
-            .background(
-                Capsule(style: .continuous)
-                    .fill(isOn ? Color.accentColor.opacity(0.2) : Color.primary.opacity(0.08))
-            )
-        }
-        .buttonStyle(.plain)
     }
 }

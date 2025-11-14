@@ -16,7 +16,6 @@ struct SettingsView: View {
     @State private var keyStatus: String = "未检测"
     @State private var selectedTextModel: GeminiModel = .defaultTextModel
     @State private var selectedImageModel: GeminiModel = .defaultImageModel
-    @State private var useMock: Bool = true
     @State private var feedbackMessage: String?
     @State private var feedbackColor: Color = .secondary
     @State private var isTestingConnection = false
@@ -44,7 +43,7 @@ struct SettingsView: View {
                 .foregroundStyle(.secondary)
 
             Form {
-                Section("模型与模式") {
+                Section("模型设置") {
                     Picker("文本模型", selection: $selectedTextModel) {
                         ForEach(GeminiModel.textOptions) { model in
                             Text(model.displayName).tag(model)
@@ -55,7 +54,6 @@ struct SettingsView: View {
                             Text(model.displayName).tag(model)
                         }
                     }
-                    Toggle("使用 Mock 模式（无网/调试）", isOn: $useMock)
                 }
 
                 Section("API Key") {
@@ -186,9 +184,6 @@ struct SettingsView: View {
         .onChange(of: selectedImageModel) { _, newValue in
             configuration.updateImageModel(newValue)
         }
-        .onChange(of: useMock) { _, newValue in
-            configuration.updateUseMock(newValue)
-        }
         .onChange(of: relayEnabled) { _, newValue in
             configuration.updateRelayEnabled(newValue)
         }
@@ -209,7 +204,6 @@ struct SettingsView: View {
     private func loadState() {
         selectedTextModel = configuration.textModel
         selectedImageModel = configuration.imageModel
-        useMock = configuration.useMock
         updateKeyStatus()
 
         relayEnabled = configuration.relayEnabled

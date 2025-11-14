@@ -18,35 +18,24 @@ final class StoryboardDialogueStore: ObservableObject {
     @Published private(set) var turns: [StoryboardDialogueTurn] = []
     @Published private(set) var scenes: [StoryboardSceneViewModel] = []
     @Published var selectedSceneID: String?
-    @Published var messageText: String = ""
     @Published var focusedEntryID: UUID?
     @Published var selectedEntryID: UUID?
-    @Published private(set) var isGenerating: Bool = false
     @Published var errorMessage: String?
     @Published private(set) var infoBanner: String?
     @Published private(set) var parserWarning: String?
     @Published private(set) var lastSavedAt: Date?
-    @Published var includePromptHint: Bool = true
-    @Published var includeScriptContext: Bool = true
-    @Published var includeStoryboardContext: Bool = true
 
     private let scriptStore: ScriptStore
     private let storyboardStore: StoryboardStore
-    private let promptLibraryStore: PromptLibraryStore
-    private let dependencies: AppDependencies
     private let parser = StoryboardResponseParser()
     private var cancellables: Set<AnyCancellable> = []
 
     init(
         scriptStore: ScriptStore,
-        storyboardStore: StoryboardStore,
-        promptLibraryStore: PromptLibraryStore,
-        dependencies: AppDependencies
+        storyboardStore: StoryboardStore
     ) {
         self.scriptStore = scriptStore
         self.storyboardStore = storyboardStore
-        self.promptLibraryStore = promptLibraryStore
-        self.dependencies = dependencies
 
         episodes = scriptStore.episodes
         observeStores()
@@ -62,11 +51,6 @@ final class StoryboardDialogueStore: ObservableObject {
             return entries.first(where: { $0.id == id })
         }
         return nil
-    }
-
-    var canSend: Bool {
-        guard selectedEpisode != nil else { return false }
-        return messageText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty == false && isGenerating == false
     }
 
     var bannerMessage: String? {
@@ -100,27 +84,6 @@ final class StoryboardDialogueStore: ObservableObject {
     var selectedShotDisplay: String {
         guard let entry = selectedEntry else { return "未选择镜头" }
         return "镜 \(entry.fields.shotNumber)"
-    }
-
-    var currentModelDisplayName: String {
-        dependencies.configuration.textModel.displayName
-    }
-
-    var currentRouteDescription: String {
-        let configuration = dependencies.configuration
-        if configuration.useMock {
-            return "Mock · 本地模拟"
-        }
-        if configuration.relayEnabled {
-            let provider = configuration.relayProviderName.isEmpty ? "中转" : configuration.relayProviderName
-            let model = configuration.relaySelectedModel ?? "未选模型"
-            return "\(provider) · \(model)"
-        }
-        return "Gemini · 官方线路"
-    }
-
-    private var storyboardSystemPrompt: String {
-        promptLibraryStore.document(for: .storyboard).content
     }
 
     func selectEpisode(id: UUID?) {
@@ -178,32 +141,6 @@ final class StoryboardDialogueStore: ObservableObject {
 
     func focus(entryID: UUID?) {
         selectEntry(id: entryID)
-    }
-
-    func sendMessage() {
-        guard isGenerating == false else { return }
-
-        guard let episode = selectedEpisode else {
-            errorMessage = "请先选择需要处理的剧集。"
-            return
-        }
-        let trimmed = messageText.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard trimmed.isEmpty == false else { return }
-
-        let userTurn = StoryboardDialogueTurn(
-            episodeID: episode.id,
-            role: .user,
-            message: trimmed,
-            referencedEntryIDs: focusedEntryID.map { [$0] } ?? []
-        )
-
-        turns.append(userTurn)
-        storyboardStore.appendDialogueTurn(userTurn)
-        messageText = ""
-        infoBanner = nil
-        parserWarning = nil
-
-        Task { await generateAssistantResponse(for: episode, userMessage: trimmed) }
     }
 
     func createManualEntry() {
@@ -330,86 +267,6 @@ final class StoryboardDialogueStore: ObservableObject {
         }
     }
 
-    private func generateAssistantResponse(for episode: ScriptEpisode, userMessage: String) async {
-        isGenerating = true
-        defer { isGenerating = false }
-
-        let existingEntries = entries
-        let synopsis = makeSynopsis(from: episode)
-        let entriesSummary = includeStoryboardContext ? summarize(entries: existingEntries) : nil
-        let focusSummary = focusedEntryID.flatMap { id in
-            existingEntries.first(where: { $0.id == id }).map { entry in
-                """
-                镜\(entry.fields.shotNumber)：\(entry.fields.shotScale)，运镜 \(entry.fields.cameraMovement)，台词：\(entry.fields.dialogueOrOS)
-                """
-            }
-        } ?? ""
-
-        var fields: [String: String] = [
-            "episodeNumber": "\(episode.episodeNumber)",
-            "userInstruction": userMessage,
-        ]
-
-        if includeScriptContext {
-            fields["episodeSynopsis"] = synopsis
-        }
-        if let entriesSummary {
-            fields["existingEntries"] = entriesSummary
-        }
-        if includePromptHint {
-            fields["responseFormat"] = StoryboardResponseParser.responseFormatHint
-        }
-        if focusSummary.isEmpty == false {
-            fields["focusEntry"] = focusSummary
-        }
-        if let scene = currentScene {
-            fields["sceneTitle"] = scene.title
-            if scene.summary.isEmpty == false {
-                fields["sceneSummary"] = scene.summary
-            }
-        }
-        let prompt = storyboardSystemPrompt.trimmingCharacters(in: .whitespacesAndNewlines)
-        if prompt.isEmpty == false {
-            fields["systemPrompt"] = prompt
-        }
-
-        let request = SceneJobRequest(
-            action: .generateScene,
-            fields: fields,
-            channel: .text
-        )
-
-        do {
-            let result = try await dependencies.textService().submit(job: request)
-            let assistantText = result.metadata.prompt
-            let assistantTurnID = UUID()
-            let touchedEntryIDs = mergeEntries(
-                assistantText: assistantText,
-                episode: episode,
-                sourceTurnID: assistantTurnID
-            )
-
-            let assistantTurn = StoryboardDialogueTurn(
-                id: assistantTurnID,
-                episodeID: episode.id,
-                role: .assistant,
-                message: assistantText,
-                referencedEntryIDs: touchedEntryIDs
-            )
-
-            turns.append(assistantTurn)
-            storyboardStore.appendDialogueTurn(assistantTurn)
-
-            if touchedEntryIDs.isEmpty {
-                parserWarning = "AI 回复已保存，但未解析出有效的分镜结构，请手动整理或调整指令。"
-            } else {
-                parserWarning = nil
-            }
-        } catch {
-            errorMessage = error.localizedDescription
-        }
-    }
-
     @discardableResult
     private func mergeEntries(
         assistantText: String,
@@ -425,7 +282,8 @@ final class StoryboardDialogueStore: ObservableObject {
         var updatedEntries = currentEntries
         var touchedIDs: [UUID] = []
 
-        for fields in parsed {
+        for parsedEntry in parsed {
+            var fields = parsedEntry.fields
             if let index = updatedEntries.firstIndex(where: { $0.fields.shotNumber == fields.shotNumber }) {
                 var entry = updatedEntries[index]
                 entry.version += 1
@@ -441,10 +299,16 @@ final class StoryboardDialogueStore: ObservableObject {
                     sourceTurnID: sourceTurnID
                 )
                 entry.revisions.append(revision)
+                if let sceneTitle = parsedEntry.sceneTitle, sceneTitle.isEmpty == false {
+                    entry.sceneTitle = sceneTitle
+                }
+                if let sceneSummary = parsedEntry.sceneSummary, sceneSummary.isEmpty == false {
+                    entry.sceneSummary = sceneSummary
+                }
                 updatedEntries[index] = entry
                 touchedIDs.append(entry.id)
             } else {
-                let sceneTitle = currentScene?.title ?? "未命名场景"
+                let sceneTitle = parsedEntry.sceneTitle ?? currentScene?.title ?? "未命名场景"
                 var entry = StoryboardEntry(
                     episodeID: episode.id,
                     fields: fields,
@@ -462,7 +326,7 @@ final class StoryboardDialogueStore: ObservableObject {
                     ],
                     lastTurnID: sourceTurnID,
                     sceneTitle: sceneTitle,
-                    sceneSummary: currentScene?.summary ?? ""
+                    sceneSummary: parsedEntry.sceneSummary ?? currentScene?.summary ?? ""
                 )
                 entry.createdAt = .now
                 entry.updatedAt = .now
@@ -566,21 +430,63 @@ final class StoryboardDialogueStore: ObservableObject {
         }
     }
 
-    private func makeSynopsis(from episode: ScriptEpisode) -> String {
-        let trimmed = episode.markdown.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard trimmed.isEmpty == false else { return "尚未提供剧本正文。" }
-        return String(trimmed.prefix(800))
+}
+
+extension StoryboardDialogueStore: StoryboardAutomationHandling {
+    func recordSidebarInstruction(_ text: String) {
+        guard let episode = selectedEpisode else { return }
+        let userTurn = StoryboardDialogueTurn(
+            episodeID: episode.id,
+            role: .user,
+            message: text,
+            referencedEntryIDs: focusedEntryID.map { [$0] } ?? []
+        )
+        turns.append(userTurn)
+        storyboardStore.appendDialogueTurn(userTurn)
+        infoBanner = nil
+        parserWarning = nil
     }
 
-private func summarize(entries: [StoryboardEntry]) -> String {
-        guard entries.isEmpty == false else { return "无分镜初稿。" }
-        return entries
-            .sorted { $0.fields.shotNumber < $1.fields.shotNumber }
-            .map { entry in
-                "镜\(entry.fields.shotNumber)：\(entry.fields.shotScale)，\(entry.fields.cameraMovement)，\(entry.fields.duration)，\(entry.fields.dialogueOrOS.prefix(40))…"
-            }
-            .joined(separator: "\n")
+    func applySidebarAIResponse(_ response: String) -> StoryboardAICommandResult? {
+        guard let episode = selectedEpisode else { return nil }
+        let assistantTurnID = UUID()
+        let touchedEntryIDs = mergeEntries(
+            assistantText: response,
+            episode: episode,
+            sourceTurnID: assistantTurnID
+        )
+        let assistantTurn = StoryboardDialogueTurn(
+            id: assistantTurnID,
+            episodeID: episode.id,
+            role: .assistant,
+            message: response,
+            referencedEntryIDs: touchedEntryIDs
+        )
+        turns.append(assistantTurn)
+        storyboardStore.appendDialogueTurn(assistantTurn)
+
+        if touchedEntryIDs.isEmpty {
+            parserWarning = "AI 回复已保存，但未解析出有效的分镜结构，请检查提示词或重新生成。"
+        } else {
+            parserWarning = nil
+        }
+
+        return StoryboardAICommandResult(
+            touchedEntries: touchedEntryIDs.count,
+            warning: parserWarning
+        )
     }
+}
+
+struct StoryboardAICommandResult {
+    let touchedEntries: Int
+    let warning: String?
+}
+
+@MainActor
+protocol StoryboardAutomationHandling: AnyObject {
+    func recordSidebarInstruction(_ text: String)
+    func applySidebarAIResponse(_ response: String) -> StoryboardAICommandResult?
 }
 
 struct StoryboardSceneViewModel: Identifiable {

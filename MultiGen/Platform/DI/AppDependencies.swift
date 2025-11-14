@@ -13,40 +13,33 @@ final class AppDependencies: ObservableObject {
     let configuration: AppConfiguration
     let credentialsStore: CredentialsStoreProtocol
     let auditRepository: AuditRepositoryProtocol
-    let mockTextService: MockGeminiService
-    let mockImageService: MockImageService
-    let geminiTextService: GeminiTextService
-    let geminiImageService: GeminiImageService
-    let relayTextService: RelayTextService
+    private let primaryTextService: GeminiTextServiceProtocol
+    private let primaryImageService: GeminiImageServiceProtocol
+    private let relayTextService: GeminiTextServiceProtocol
 
     init(
         configuration: AppConfiguration,
         credentialsStore: CredentialsStoreProtocol,
         auditRepository: AuditRepositoryProtocol,
-        mockTextService: MockGeminiService,
-        mockImageService: MockImageService,
-        geminiTextService: GeminiTextService,
-        geminiImageService: GeminiImageService,
-        relayTextService: RelayTextService
+        primaryTextService: GeminiTextServiceProtocol,
+        primaryImageService: GeminiImageServiceProtocol,
+        relayTextService: GeminiTextServiceProtocol
     ) {
         self.configuration = configuration
         self.credentialsStore = credentialsStore
         self.auditRepository = auditRepository
-        self.mockTextService = mockTextService
-        self.mockImageService = mockImageService
-        self.geminiTextService = geminiTextService
-        self.geminiImageService = geminiImageService
+        self.primaryTextService = primaryTextService
+        self.primaryImageService = primaryImageService
         self.relayTextService = relayTextService
     }
 
     func textService() -> GeminiTextServiceProtocol {
-        if configuration.useMock { return mockTextService }
         if configuration.relayEnabled { return relayTextService }
-        return geminiTextService
+        return primaryTextService
     }
 
     func imageService() -> GeminiImageServiceProtocol {
-        configuration.useMock ? mockImageService : geminiImageService
+        primaryImageService
     }
 }
 
@@ -55,8 +48,6 @@ extension AppDependencies {
         let configuration = AppConfiguration()
         let credentialsStore = KeychainCredentialsStore()
         let auditRepository = MemoryAuditRepository()
-        let mockText = MockGeminiService()
-        let mockImage = MockImageService()
         let textService = GeminiTextService(
             credentialsStore: credentialsStore,
             modelProvider: { [configuration] in
@@ -79,10 +70,8 @@ extension AppDependencies {
             configuration: configuration,
             credentialsStore: credentialsStore,
             auditRepository: auditRepository,
-            mockTextService: mockText,
-            mockImageService: mockImage,
-            geminiTextService: textService,
-            geminiImageService: imageService,
+            primaryTextService: textService,
+            primaryImageService: imageService,
             relayTextService: relayService
         )
     }
@@ -92,39 +81,20 @@ extension AppDependencies {
         let configuration = AppConfiguration(
             defaults: defaults,
             initialTextModel: .flash25,
-            initialImageModel: .flash25ImagePreview,
-            initialUseMock: true
+            initialImageModel: .flash25ImagePreview
         )
         let credentialsStore = MockCredentialsStore()
         let auditRepository = MemoryAuditRepository()
         let mockText = MockGeminiService(simulatedDelay: 0.3)
         let mockImage = MockImageService()
-        let textService = GeminiTextService(
-            credentialsStore: credentialsStore,
-            modelProvider: { [configuration] in
-                await MainActor.run {
-                    configuration.textModel
-                }
-            }
-        )
-        let imageService = GeminiImageService(
-            credentialsStore: credentialsStore,
-            modelProvider: { [configuration] in
-                await MainActor.run {
-                    configuration.imageModel
-                }
-            }
-        )
         let relayService = RelayTextService(configuration: configuration)
 
         return AppDependencies(
             configuration: configuration,
             credentialsStore: credentialsStore,
             auditRepository: auditRepository,
-            mockTextService: mockText,
-            mockImageService: mockImage,
-            geminiTextService: textService,
-            geminiImageService: imageService,
+            primaryTextService: mockText,
+            primaryImageService: mockImage,
             relayTextService: relayService
         )
     }

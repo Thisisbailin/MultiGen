@@ -11,6 +11,7 @@ import AppKit
 
 struct ScriptView: View {
     @EnvironmentObject private var store: ScriptStore
+    @EnvironmentObject private var navigationStore: NavigationStore
     @State private var selectedProjectID: UUID?
     @State private var selectedEpisodeID: UUID?
     @State private var showingNewProjectSheet = false
@@ -61,6 +62,17 @@ struct ScriptView: View {
         .padding(.horizontal, 24)
         .padding(.vertical, 18)
         .animation(.easeInOut(duration: 0.2), value: selectedProjectID)
+        .onAppear {
+            navigationStore.currentScriptEpisodeID = selectedEpisodeID
+        }
+        .onChange(of: selectedEpisodeID) { _, newValue in
+            navigationStore.currentScriptEpisodeID = newValue
+        }
+        .onChange(of: selectedProjectID) { _, newValue in
+            if newValue == nil {
+                navigationStore.currentScriptEpisodeID = nil
+            }
+        }
         .sheet(isPresented: $showingNewProjectSheet) {
             NewProjectSheet { title, synopsis, type in
                 let project = store.addProject(title: title, synopsis: synopsis, type: type)

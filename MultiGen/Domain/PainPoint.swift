@@ -87,7 +87,7 @@ public enum PainPointCatalog {
             id: "key-security",
             title: "API Key 管理混乱",
             detail: "Gemini 密钥多以文本共享，存在泄露与失效风险。",
-            solution: "应用提供 Keychain 安全存储与权限检测，必要时可快速清除或切换 Mock 模式。"
+            solution: "应用提供 Keychain 安全存储与权限检测，必要时可提示用户更新密钥或启用 relay 兜底。"
         ),
         PainPoint(
             id: "iteration-cost",

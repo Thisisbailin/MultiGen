@@ -17,7 +17,6 @@ final class AppConfiguration: ObservableObject {
     private enum Keys {
         static let textModel = "app.configuration.textModel"
         static let imageModel = "app.configuration.imageModel"
-        static let useMock = "app.configuration.useMock"
         static let relayEnabled = "app.configuration.relay.enabled"
         static let relayProviderName = "app.configuration.relay.name"
         static let relayProviderType = "app.configuration.relay.type"
@@ -31,7 +30,6 @@ final class AppConfiguration: ObservableObject {
 
     @Published private(set) var textModel: GeminiModel
     @Published private(set) var imageModel: GeminiModel
-    @Published private(set) var useMock: Bool
 
     @Published private(set) var relayEnabled: Bool
     @Published private(set) var relayProviderName: String
@@ -44,8 +42,7 @@ final class AppConfiguration: ObservableObject {
     init(
         defaults: UserDefaults = .standard,
         initialTextModel: GeminiModel? = nil,
-        initialImageModel: GeminiModel? = nil,
-        initialUseMock: Bool? = nil
+        initialImageModel: GeminiModel? = nil
     ) {
         self.defaults = defaults
 
@@ -59,10 +56,6 @@ final class AppConfiguration: ObservableObject {
                 .flatMap(GeminiModel.init(rawValue:))
             ?? GeminiModel.defaultImageModel
 
-        let storedUseMock = initialUseMock
-            ?? defaults.object(forKey: Keys.useMock) as? Bool
-            ?? true
-
         let storedRelayEnabled = defaults.object(forKey: Keys.relayEnabled) as? Bool ?? false
         let storedProviderName = defaults.string(forKey: Keys.relayProviderName) ?? ""
         let storedProviderType = defaults.string(forKey: Keys.relayProviderType)
@@ -75,7 +68,6 @@ final class AppConfiguration: ObservableObject {
 
         _textModel = Published(initialValue: storedText)
         _imageModel = Published(initialValue: storedImage)
-        _useMock = Published(initialValue: storedUseMock)
         _relayEnabled = Published(initialValue: storedRelayEnabled)
         _relayProviderName = Published(initialValue: storedProviderName)
         _relayProviderType = Published(initialValue: storedProviderType)
@@ -93,11 +85,6 @@ final class AppConfiguration: ObservableObject {
     func updateImageModel(_ model: GeminiModel) {
         imageModel = model
         defaults.set(model.rawValue, forKey: Keys.imageModel)
-    }
-
-    func updateUseMock(_ flag: Bool) {
-        useMock = flag
-        defaults.set(flag, forKey: Keys.useMock)
     }
 
     func updateRelayEnabled(_ enabled: Bool) {

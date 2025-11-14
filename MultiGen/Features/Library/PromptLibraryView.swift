@@ -9,7 +9,7 @@ import SwiftUI
 
 struct PromptLibraryView: View {
     @EnvironmentObject private var store: PromptLibraryStore
-    @State private var selectedModule: PromptDocument.Module = .storyboard
+    @State private var selectedModule: PromptDocument.Module = .aiConsole
     @State private var draftContent: String = ""
     @State private var showSavedToast = false
 
@@ -74,6 +74,13 @@ struct PromptLibraryView: View {
                     Label("保存自定义提示词", systemImage: "square.and.arrow.down")
                 }
                 .buttonStyle(.borderedProminent)
+                Button(role: .destructive) {
+                    store.resetDocument(module: selectedModule)
+                    loadDraft()
+                } label: {
+                    Label("恢复默认", systemImage: "arrow.counterclockwise")
+                }
+                .buttonStyle(.bordered)
             }
         }
     }
