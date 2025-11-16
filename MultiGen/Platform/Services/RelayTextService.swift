@@ -17,12 +17,12 @@ final class RelayTextService: GeminiTextServiceProtocol {
     }
 
     public func submit(job request: SceneJobRequest) async throws -> SceneJobResult {
-        let snapshot = await MainActor.run { relaySnapshot() }
+        let snapshot = await MainActor.run { configuration.relaySettingsSnapshot() }
         guard let snapshot else {
             throw GeminiServiceError.relayConfigurationMissing
         }
 
-        let endpoint = RelayTextService.normalize(baseURL: snapshot.baseURL) + "/v1/chat/completions"
+        let endpoint = RelaySettingsSnapshot.normalize(baseURL: snapshot.baseURL) + "/v1/chat/completions"
         guard let url = URL(string: endpoint) else {
             throw GeminiServiceError.invalidRequest
         }
@@ -75,19 +75,6 @@ final class RelayTextService: GeminiTextServiceProtocol {
         return SceneJobResult(imageURL: nil, imageBase64: nil, metadata: metadata)
     }
 
-    @MainActor
-    private func relaySnapshot() -> RelaySettingsSnapshot? {
-        guard configuration.relayEnabled,
-              configuration.relayProviderType == .openai,
-              let selected = configuration.relaySelectedModel,
-              !selected.isEmpty else { return nil }
-
-        let base = configuration.relayAPIBase.trimmingCharacters(in: .whitespacesAndNewlines)
-        let key = configuration.relayAPIKey.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard base.isEmpty == false, key.isEmpty == false else { return nil }
-        return RelaySettingsSnapshot(baseURL: base, apiKey: key, model: selected)
-    }
-
     private func promptBody(for request: SceneJobRequest) -> String {
         let sortedFields = request.fields
             .sorted { $0.key < $1.key }
@@ -104,20 +91,6 @@ final class RelayTextService: GeminiTextServiceProtocol {
         \(sortedFields)\(assetRefs)
         """
     }
-
-    static func normalize(baseURL: String) -> String {
-        var trimmed = baseURL.trimmingCharacters(in: .whitespacesAndNewlines)
-        if trimmed.hasSuffix("/") {
-            trimmed.removeLast()
-        }
-        return trimmed
-    }
-}
-
-private struct RelaySettingsSnapshot {
-    let baseURL: String
-    let apiKey: String
-    let model: String
 }
 
 private struct RelayChatRequest: Encodable {
@@ -139,11 +112,4 @@ private struct RelayChatResponse: Decodable {
         let message: Message
     }
     let choices: [Choice]
-}
-
-private struct RelayAPIError: Decodable {
-    struct APIError: Decodable {
-        let message: String
-    }
-    let error: APIError
 }

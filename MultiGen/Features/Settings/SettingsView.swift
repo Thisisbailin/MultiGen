@@ -6,6 +6,7 @@
 //
 
 import SwiftUI
+import AppKit
 
 struct SettingsView: View {
     @EnvironmentObject private var dependencies: AppDependencies
@@ -34,6 +35,7 @@ struct SettingsView: View {
     @State private var textTestInput: String = ""
     @State private var textTestResponse: String = ""
     @State private var isSubmittingTextTest = false
+    @State private var isExportingAudit = false
 
     var body: some View {
         VStack(alignment: .leading, spacing: 24) {
@@ -160,6 +162,19 @@ struct SettingsView: View {
                                 .stroke(Color.secondary.opacity(0.2))
                         )
                     }
+                }
+
+                Section("审计日志") {
+                    Button {
+                        exportAuditLog()
+                    } label: {
+                        if isExportingAudit {
+                            ProgressView()
+                        } else {
+                            Label("导出审计日志", systemImage: "square.and.arrow.up")
+                        }
+                    }
+                    .disabled(isExportingAudit)
                 }
             }
             .formStyle(.grouped)
@@ -331,7 +346,7 @@ struct SettingsView: View {
         isSyncingRelayModels = true
         defer { isSyncingRelayModels = false }
 
-        let endpoint = RelayTextService.normalize(baseURL: base) + "/v1/models"
+        let endpoint = RelaySettingsSnapshot.normalize(baseURL: base) + "/v1/models"
         guard let url = URL(string: endpoint) else {
             feedbackColor = .red
             feedbackMessage = "API 地址无效。"
@@ -363,6 +378,41 @@ struct SettingsView: View {
     private var isKeyActive: Bool {
         guard let key = storedKeyPlaintext else { return false }
         return key.isEmpty == false
+    }
+
+    private func exportAuditLog() {
+        isExportingAudit = true
+        Task {
+            let entries = await dependencies.auditRepository.loadAllEntries()
+            guard entries.isEmpty == false else {
+                await MainActor.run {
+                    feedbackColor = .orange
+                    feedbackMessage = "暂无审计记录可导出。"
+                    isExportingAudit = false
+                }
+                return
+            }
+            await MainActor.run {
+                let panel = NSSavePanel()
+                panel.nameFieldStringValue = "MultiGen-Audit-\(Date.now.formatted(date: .numeric, time: .shortened)).json"
+                panel.canCreateDirectories = true
+                if panel.runModal() == .OK, let url = panel.url {
+                    do {
+                        let encoder = JSONEncoder()
+                        encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
+                        encoder.dateEncodingStrategy = .iso8601
+                        let data = try encoder.encode(entries)
+                        try data.write(to: url, options: .atomic)
+                        feedbackColor = .green
+                        feedbackMessage = "审计日志已导出：\(url.lastPathComponent)"
+                    } catch {
+                        feedbackColor = .red
+                        feedbackMessage = "导出失败：\(error.localizedDescription)"
+                    }
+                }
+                isExportingAudit = false
+            }
+        }
     }
 }
 

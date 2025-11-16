@@ -14,6 +14,8 @@ public struct StoryboardEntryFields: Codable, Hashable, Sendable {
     public var duration: String
     public var dialogueOrOS: String
     public var aiPrompt: String
+    public var visualSummary: String
+    public var soundDesign: String
 
     public init(
         shotNumber: Int = 1,
@@ -21,7 +23,9 @@ public struct StoryboardEntryFields: Codable, Hashable, Sendable {
         cameraMovement: String = "",
         duration: String = "",
         dialogueOrOS: String = "",
-        aiPrompt: String = ""
+        aiPrompt: String = "",
+        visualSummary: String = "",
+        soundDesign: String = ""
     ) {
         self.shotNumber = shotNumber
         self.shotScale = shotScale
@@ -29,6 +33,8 @@ public struct StoryboardEntryFields: Codable, Hashable, Sendable {
         self.duration = duration
         self.dialogueOrOS = dialogueOrOS
         self.aiPrompt = aiPrompt
+        self.visualSummary = visualSummary
+        self.soundDesign = soundDesign
     }
 }
 
@@ -93,6 +99,7 @@ public struct StoryboardEntry: Identifiable, Codable, Hashable, Sendable {
     public var notes: String
     public var revisions: [StoryboardRevision]
     public var lastTurnID: UUID?
+    public var sceneID: UUID?
     public var sceneTitle: String
     public var sceneSummary: String
     public var createdAt: Date
@@ -107,6 +114,7 @@ public struct StoryboardEntry: Identifiable, Codable, Hashable, Sendable {
         notes: String = "",
         revisions: [StoryboardRevision] = [],
         lastTurnID: UUID? = nil,
+        sceneID: UUID? = nil,
         sceneTitle: String = "未命名场景",
         sceneSummary: String = "",
         createdAt: Date = .now,
@@ -120,6 +128,7 @@ public struct StoryboardEntry: Identifiable, Codable, Hashable, Sendable {
         self.notes = notes
         self.revisions = revisions
         self.lastTurnID = lastTurnID
+        self.sceneID = sceneID
         self.sceneTitle = sceneTitle
         self.sceneSummary = sceneSummary
         self.createdAt = createdAt
@@ -134,6 +143,7 @@ public struct StoryboardEntry: Identifiable, Codable, Hashable, Sendable {
         case notes
         case revisions
         case lastTurnID
+        case sceneID
         case sceneTitle
         case sceneSummary
         case createdAt
@@ -150,6 +160,7 @@ public struct StoryboardEntry: Identifiable, Codable, Hashable, Sendable {
         notes = try container.decodeIfPresent(String.self, forKey: .notes) ?? ""
         revisions = try container.decodeIfPresent([StoryboardRevision].self, forKey: .revisions) ?? []
         lastTurnID = try container.decodeIfPresent(UUID.self, forKey: .lastTurnID)
+        sceneID = try container.decodeIfPresent(UUID.self, forKey: .sceneID)
         sceneTitle = try container.decodeIfPresent(String.self, forKey: .sceneTitle) ?? "未命名场景"
         sceneSummary = try container.decodeIfPresent(String.self, forKey: .sceneSummary) ?? ""
         createdAt = try container.decodeIfPresent(Date.self, forKey: .createdAt) ?? .now
@@ -166,6 +177,7 @@ public struct StoryboardEntry: Identifiable, Codable, Hashable, Sendable {
         try container.encode(notes, forKey: .notes)
         try container.encode(revisions, forKey: .revisions)
         try container.encodeIfPresent(lastTurnID, forKey: .lastTurnID)
+        try container.encodeIfPresent(sceneID, forKey: .sceneID)
         try container.encode(sceneTitle, forKey: .sceneTitle)
         try container.encode(sceneSummary, forKey: .sceneSummary)
         try container.encode(createdAt, forKey: .createdAt)

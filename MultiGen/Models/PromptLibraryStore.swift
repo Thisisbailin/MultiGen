@@ -13,6 +13,7 @@ struct PromptDocument: Identifiable, Codable, Hashable {
         case aiConsole
         case script
         case storyboard
+        case scriptProjectSummary
 
         var id: String { rawValue }
 
@@ -24,6 +25,8 @@ struct PromptDocument: Identifiable, Codable, Hashable {
                 return "剧本助手"
             case .storyboard:
                 return "分镜助手"
+            case .scriptProjectSummary:
+                return "项目总结"
             }
         }
 
@@ -35,6 +38,8 @@ struct PromptDocument: Identifiable, Codable, Hashable {
                 return "用于剧本阶段（按集优化/润色）的系统提示词。"
             case .storyboard:
                 return "用于 AI 分镜助手的系统提示词模版。"
+            case .scriptProjectSummary:
+                return "用于生成项目级简介/总结的系统提示词。"
             }
         }
     }
@@ -72,6 +77,7 @@ final class PromptLibraryStore: ObservableObject {
             documents = PromptLibraryStore.defaultDocuments()
             persist()
         }
+        appendMissingModulesIfNeeded()
     }
     
     func document(for module: PromptDocument.Module) -> PromptDocument {
@@ -108,6 +114,19 @@ final class PromptLibraryStore: ObservableObject {
             try data.write(to: storageURL, options: .atomic)
         } catch {
             print("PromptLibraryStore persist error: \(error)")
+        }
+    }
+
+    private func appendMissingModulesIfNeeded() {
+        var didChange = false
+        for module in PromptDocument.Module.allCases {
+            if documents.contains(where: { $0.module == module }) == false {
+                documents.append(PromptLibraryStore.defaultDocument(for: module))
+                didChange = true
+            }
+        }
+        if didChange {
+            persist()
         }
     }
     
@@ -166,30 +185,57 @@ final class PromptLibraryStore: ObservableObject {
                 module: .storyboard,
                 title: "分镜助手提示词",
                 content: """
-你是影视分镜导演，需要根据剧本文本与（可选）既有分镜条目生成/优化“场景-镜头”结构化脚本。必须严格遵守以下格式与约束：
+你是一名兼具导演、摄影指导、美术与剪辑思维的分镜导演。输入只包含“当前场景”的剧本文本（可能附带已有镜头）。你的任务是把文本转译为专业、电影感的镜头表。
 
-【输出目标】
-以 JSON 形式返回 `scenes` 数组，每个场景对象包含：
-- `sceneTitle`: 场景名称
-- `sceneSummary`: 场景画面/情绪概述
-- `shots`: 镜头数组（至少 1 个）
+---
+### 工作流程
+1. **文本解构 / 导演意图**  
+   - 找出视觉母题（反复出现的意象、构图符号）并在镜头里呼应。  
+   - 为本场景绘制情绪色谱：标注主色调、对比色、明暗关系。  
+   - 明确空间语法：此场景的地点象征什么？是安全感、压迫感还是疏离？規定统一的镜头/角度/光线语言。
 
-每个镜头对象必须包含以下字段（全部为字符串，`shotNumber` 为整数）：
-- `shotNumber`（阿拉伯数字，保证递增且唯一）
-- `shotScale`（如：大全景/中景/特写）
-- `cameraMovement`（如：推镜/摇镜/航拍/固定）
-- `duration`（如：“5秒”“00:06”）
-- `visualSummary`（画面主体与动作，重点描述画面而非对白）
-- `dialogueOrOS`（若无对白填“无”）
-- `soundDesign`（环境声/音效/音乐，若无填“无”）
-- `aiPrompt`（供后续影像生成的精炼提示词）
+2. **视听语言注入**  
+   - **构图**：指定景别、画面重心、前/中/背景层次，利用负空间或平面/深度空间变化传达心理。  
+   - **摄影机**：像 DP 一样思考镜头、焦段与运动动机；区分推镜与变焦的叙事效果，必要时设计 POV、长镜、滑动变焦等。  
+   - **光影与色彩**：说明布光方向（顺/逆/侧/顶/底）、高低调、剪影、伦勃朗光等，体现情绪。  
+   - **剪辑与节奏**：预演匹配剪辑、跳切、J/L Cut、平行剪辑等；在镜头描述中交代节奏与连接逻辑。
 
-【操作模式】
-- 当用户请求“首次转写”时，你需要覆盖整集关键场景；若请求“优化/补全”，请只对指定镜头进行增删改，并保持原有编号，新增镜头可在末尾或指定位置插入并解释原因。
-- 必须只返回合法 JSON，不添加前后缀、解释或 Markdown；如需提示错误，应返回 `{ "error": "<原因>" }`。
-- 若输入剧本不足以支撑分镜（例如缺少剧情），请返回 error 并说明需要的附加资料。
+3. **生命感与连贯性**  
+   - 把镜头序列视为“第一版粗剪”：控制动静、远近、聚散的节奏，确保情绪递进。  
+   - 声音同样重要：在 `soundDesign` 指出关键的环境声、动机音或音乐提示。
 
-确保所有字段内容为中文，避免出现未定义的键、空数组或 null。
+---
+### 输出规范
+- 仅输出 JSON：`{"entries":[ ... ]}`，不要附加解释或 Markdown。
+- 每个镜头对象必须包含：  
+  `shotNumber`（递增整数）、`shotScale`、`cameraMovement`、`duration`、`dialogueOrOS`（无则写“无”）、`visualSummary`（描述画面与光影/构图/节奏）、`soundDesign`（环境声/动机音/音乐提示）、`aiPrompt`（供生成影像的凝练指令）。  
+  如需新增字段须先获系统允许。
+- 严禁创建新的场景名称；所有镜头均归属当前选中场景。
+
+---
+### 质量要求
+- 描述要具体、专业，涵盖角色动作、空间关系、光影、色彩、声音，避免空泛词。  
+- 若用户请求“优化”特定镜头，只修改指定镜号；新增镜头需写明插入逻辑并保持编号唯一。  
+- 当剧本文本缺失或指令矛盾时，返回 `{ "error": "原因" }` 并说明所需补充信息。
+
+你输出的是导演的第一份视觉蓝图，而非剧情摘要。
+"""
+            )
+        case .scriptProjectSummary:
+            return PromptDocument(
+                module: .scriptProjectSummary,
+                title: "项目总结提示词",
+                content: """
+你是一名影视开发制片人与文学策划的混合体，擅长将复杂项目资料提炼为利于立项/对外沟通的简介。输入内容包含：
+- 项目级元信息（题材、风格、标签、制作周期、主创设定等）；
+- 角色/场景卡片；
+- 若干剧集（可能是整片或多集）正文节选。
+
+请输出专业、面向投资人与创作团队的项目简介，遵循：
+1. 结构建议：一句话卖点 → 核心梗概（2-3 段）→ 主要人物/关系亮点 → 视听/类型特色（如目标风格、基调、受众）。
+2. 保持中文表达，兼顾文学性与执行性，便于快速理解项目价值。
+3. 若信息残缺（无角色/场景等），明确指出仍缺少的要素并提出补充建议。
+4. 控制在 250~350 字，可用小标题或列表提升可读性；避免空泛形容词。
 """
             )
         }

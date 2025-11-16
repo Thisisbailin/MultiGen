@@ -28,6 +28,7 @@ struct StoryboardResponseParser {
         var movement: String?
         var duration: String?
         var time: String?
+        var dialogueOrOS: String?
         var dialogue: String?
         var dialog: String?
         var os: String?
@@ -35,14 +36,18 @@ struct StoryboardResponseParser {
         var aiPrompt: String?
         var prompt: String?
         var description: String?
+        var visualSummary: String?
+        var soundDesign: String?
 
         func makeFields(defaultShotNumber: Int) -> StoryboardEntryFields {
             let number = shotNumber ?? shot ?? number ?? index ?? defaultShotNumber
             let scaleValue = shotScale ?? scale ?? sceneScale ?? ""
             let movementValue = cameraMovement ?? camera ?? movement ?? ""
             let durationValue = duration ?? time ?? ""
-            let dialogueValue = dialogue ?? dialog ?? os ?? narration ?? description ?? ""
+            let dialogueValue = dialogueOrOS ?? dialogue ?? dialog ?? os ?? narration ?? ""
             let promptValue = aiPrompt ?? prompt ?? ""
+            let visualValue = visualSummary ?? description ?? ""
+            let soundValue = soundDesign ?? ""
 
             return StoryboardEntryFields(
                 shotNumber: number,
@@ -50,7 +55,9 @@ struct StoryboardResponseParser {
                 cameraMovement: movementValue,
                 duration: durationValue,
                 dialogueOrOS: dialogueValue,
-                aiPrompt: promptValue
+                aiPrompt: promptValue,
+                visualSummary: visualValue,
+                soundDesign: soundValue
             )
         }
     }

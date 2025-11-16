@@ -16,6 +16,7 @@ final class AppDependencies: ObservableObject {
     private let primaryTextService: GeminiTextServiceProtocol
     private let primaryImageService: GeminiImageServiceProtocol
     private let relayTextService: GeminiTextServiceProtocol
+    private let relayImageService: GeminiImageServiceProtocol
 
     init(
         configuration: AppConfiguration,
@@ -23,7 +24,8 @@ final class AppDependencies: ObservableObject {
         auditRepository: AuditRepositoryProtocol,
         primaryTextService: GeminiTextServiceProtocol,
         primaryImageService: GeminiImageServiceProtocol,
-        relayTextService: GeminiTextServiceProtocol
+        relayTextService: GeminiTextServiceProtocol,
+        relayImageService: GeminiImageServiceProtocol
     ) {
         self.configuration = configuration
         self.credentialsStore = credentialsStore
@@ -31,15 +33,25 @@ final class AppDependencies: ObservableObject {
         self.primaryTextService = primaryTextService
         self.primaryImageService = primaryImageService
         self.relayTextService = relayTextService
+        self.relayImageService = relayImageService
     }
 
     func textService() -> GeminiTextServiceProtocol {
-        if configuration.relayEnabled { return relayTextService }
+        if configuration.relaySettingsSnapshot() != nil { return relayTextService }
         return primaryTextService
     }
 
     func imageService() -> GeminiImageServiceProtocol {
-        primaryImageService
+        if configuration.relaySettingsSnapshot() != nil { return relayImageService }
+        return primaryImageService
+    }
+
+    func currentTextRoute() -> GeminiRoute {
+        configuration.relaySettingsSnapshot() != nil ? .relay : .official
+    }
+
+    func currentImageRoute() -> GeminiRoute {
+        configuration.relaySettingsSnapshot() != nil ? .relay : .official
     }
 }
 
@@ -47,7 +59,7 @@ extension AppDependencies {
     static func live() -> AppDependencies {
         let configuration = AppConfiguration()
         let credentialsStore = KeychainCredentialsStore()
-        let auditRepository = MemoryAuditRepository()
+        let auditRepository = FileAuditRepository()
         let textService = GeminiTextService(
             credentialsStore: credentialsStore,
             modelProvider: { [configuration] in
@@ -65,6 +77,7 @@ extension AppDependencies {
             }
         )
         let relayService = RelayTextService(configuration: configuration)
+        let relayImageService = RelayImageService(configuration: configuration)
 
         return AppDependencies(
             configuration: configuration,
@@ -72,7 +85,8 @@ extension AppDependencies {
             auditRepository: auditRepository,
             primaryTextService: textService,
             primaryImageService: imageService,
-            relayTextService: relayService
+            relayTextService: relayService,
+            relayImageService: relayImageService
         )
     }
 
@@ -88,6 +102,7 @@ extension AppDependencies {
         let mockText = MockGeminiService(simulatedDelay: 0.3)
         let mockImage = MockImageService()
         let relayService = RelayTextService(configuration: configuration)
+        let relayImageService = RelayImageService(configuration: configuration)
 
         return AppDependencies(
             configuration: configuration,
@@ -95,7 +110,8 @@ extension AppDependencies {
             auditRepository: auditRepository,
             primaryTextService: mockText,
             primaryImageService: mockImage,
-            relayTextService: relayService
+            relayTextService: relayService,
+            relayImageService: relayImageService
         )
     }
 }

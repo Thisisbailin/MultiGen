@@ -8,6 +8,10 @@
 import SwiftUI
 import Combine
 
+enum SceneComposerFeatureFlag {
+    static let isEnabled: Bool = true
+}
+
 struct ContentView: View {
     @EnvironmentObject private var configuration: AppConfiguration
     @EnvironmentObject private var dependencies: AppDependencies
@@ -51,8 +55,8 @@ struct ContentView: View {
                         }
                         ToolbarItem(placement: .status) {
                             VStack(alignment: .leading, spacing: 2) {
-                                Label("文本：\(configuration.textModel.displayName)", systemImage: "text.book.closed")
-                                Label("图像：\(configuration.imageModel.displayName)", systemImage: "photo.on.rectangle")
+                                Label("文本：\(configuration.textModel.displayName) · \(dependencies.currentTextRoute().displayName)", systemImage: "text.book.closed")
+                                Label("图像：\(configuration.imageModel.displayName) · \(dependencies.currentImageRoute().displayName)", systemImage: "photo.on.rectangle")
                             }
                             .labelStyle(.titleAndIcon)
                             .padding(.horizontal, 8)
@@ -89,11 +93,16 @@ struct ContentView: View {
     private func detailView(for item: SidebarItem) -> some View {
         switch item {
         case .home:
-            ScenarioOverviewView(
-                painPoints: PainPointCatalog.corePainPoints,
-                actions: SceneAction.workflowActions
-            )
-            .navigationTitle("MultiGen 控制台")
+            if SceneComposerFeatureFlag.isEnabled {
+                SceneComposerView()
+                    .navigationTitle("SceneComposer")
+            } else {
+                ScenarioOverviewView(
+                    painPoints: PainPointCatalog.corePainPoints,
+                    actions: SceneAction.workflowActions
+                )
+                .navigationTitle("MultiGen 控制台")
+            }
         case .script:
             ScriptView()
                 .navigationTitle("剧本")
@@ -106,7 +115,7 @@ struct ContentView: View {
             }
                 .navigationTitle("分镜")
         case .image:
-            ImagingPlaceholderView()
+            ImagingView()
                 .navigationTitle("影像")
         case .libraryCharacters, .libraryScenes, .libraryPrompts:
             if item == .libraryPrompts {
@@ -174,7 +183,19 @@ final class NavigationStore: ObservableObject {
     @Published var showSettingsSheet = false
     @Published var currentScriptEpisodeID: UUID?
     @Published var currentStoryboardEpisodeID: UUID?
+    @Published var currentStoryboardSceneID: UUID?
+    @Published var currentStoryboardSceneSnapshot: StoryboardSceneContextSnapshot?
+    @Published var pendingProjectSummaryID: UUID?
+    @Published var pendingAIChatSystemMessage: String?
     weak var storyboardAutomationHandler: (any StoryboardAutomationHandling)?
+}
+
+struct StoryboardSceneContextSnapshot: Equatable {
+    var id: UUID?
+    var title: String
+    var order: Int?
+    var summary: String
+    var body: String
 }
 
 private struct PainPointSheetView: View {
@@ -246,6 +267,8 @@ private struct AIChatSidebarView: View {
     @State private var errorMessage: String?
     @FocusState private var isTextFocused: Bool
     @State private var expandedMessageIDs: Set<UUID> = []
+    @State private var pendingSummaryMessageID: UUID?
+    private let projectSummaryPromptText = "请基于 projectContext 中提供的资料生成一段 250-350 字的专业项目简介，强调核心卖点、主冲突以及视听/类型特色，并指出潜在受众。"
 
     var body: some View {
         VStack(spacing: 8) {
@@ -324,6 +347,21 @@ private struct AIChatSidebarView: View {
             )
         }
         .padding(10)
+        .onAppear {
+            processPendingProjectSummary()
+        }
+        .onChange(of: navigationStore.pendingProjectSummaryID) { _, _ in
+            processPendingProjectSummary()
+        }
+        .onChange(of: navigationStore.pendingAIChatSystemMessage) { _, newValue in
+            guard let message = newValue else { return }
+            navigationStore.pendingAIChatSystemMessage = nil
+            let systemMessage = AIChatMessage(
+                role: .system,
+                text: message
+            )
+            messages.append(systemMessage)
+        }
     }
 
     private func sendMessage() {
@@ -331,6 +369,11 @@ private struct AIChatSidebarView: View {
         guard trimmed.isEmpty == false else { return }
 
         let contextSnapshot = activeContext
+        if case let .storyboard(_, _, scene, snapshot, _) = contextSnapshot,
+           scene == nil && snapshot == nil {
+            errorMessage = "请先在剧本模块创建并选择场景，再请求分镜。"
+            return
+        }
         if case .storyboard = contextSnapshot {
             navigationStore.storyboardAutomationHandler?.recordSidebarInstruction(trimmed)
         }
@@ -344,14 +387,11 @@ private struct AIChatSidebarView: View {
         Task {
             defer { isSending = false }
             do {
-                let fields = makeRequestFields(for: trimmed)
-                let request = SceneJobRequest(
-                    action: .aiConsole,
-                    fields: fields,
-                    channel: .text
+                let replyText = try await requestAIResponse(
+                    prompt: trimmed,
+                    context: contextSnapshot,
+                    module: activePromptModule
                 )
-                let result = try await dependencies.textService().submit(job: request)
-                let replyText = result.metadata.prompt
                 await MainActor.run {
                     handleAIResponse(text: replyText, context: contextSnapshot)
                 }
@@ -360,6 +400,97 @@ private struct AIChatSidebarView: View {
                     errorMessage = error.localizedDescription
                 }
             }
+        }
+    }
+
+    private func processPendingProjectSummary() {
+        guard let id = navigationStore.pendingProjectSummaryID else { return }
+        guard let project = scriptStore.projects.first(where: { $0.id == id }) else { return }
+        navigationStore.pendingProjectSummaryID = nil
+        runProjectSummary(for: project)
+    }
+
+    private func runProjectSummary(for project: ScriptProject) {
+        navigationStore.sidebarMode = .ai
+        if isSending { return }
+        isSending = true
+        errorMessage = nil
+        let pendingMessage = AIChatMessage(
+            role: .system,
+            text: "正在生成《\(project.title)》项目简介…",
+            detail: "AI 正在分析项目资料"
+        )
+        messages.append(pendingMessage)
+        pendingSummaryMessageID = pendingMessage.id
+        Task {
+            defer {
+                isSending = false
+                pendingSummaryMessageID = nil
+            }
+            do {
+                let replyText = try await requestAIResponse(
+                    prompt: projectSummaryPromptText,
+                    context: .scriptProject(project: project),
+                    module: .scriptProjectSummary
+                )
+                await MainActor.run {
+                    let trimmed = replyText.trimmingCharacters(in: .whitespacesAndNewlines)
+                    scriptStore.updateProject(id: project.id) { editable in
+                        editable.synopsis = trimmed
+                    }
+                    let finalMessage = AIChatMessage(
+                        id: pendingMessage.id,
+                        role: .system,
+                        text: "已生成项目简介：\(project.title)",
+                        detail: replyText
+                    )
+                    replaceMessage(id: pendingMessage.id, with: finalMessage)
+                }
+            } catch {
+                await MainActor.run {
+                    let failureMessage = AIChatMessage(
+                        id: pendingMessage.id,
+                        role: .system,
+                        text: "项目简介生成失败：\(project.title)",
+                        detail: error.localizedDescription
+                    )
+                    replaceMessage(id: pendingMessage.id, with: failureMessage)
+                    self.errorMessage = error.localizedDescription
+                }
+            }
+        }
+    }
+
+    private func requestAIResponse(
+        prompt: String,
+        context: ChatContext,
+        module: PromptDocument.Module
+    ) async throws -> String {
+        let fields = makeRequestFields(prompt: prompt, context: context, module: module)
+        let request = SceneJobRequest(
+            action: .aiConsole,
+            fields: fields,
+            channel: .text
+        )
+        let result = try await dependencies.textService().submit(job: request)
+        let replyText = result.metadata.prompt
+        let auditEntry = AuditLogEntry(
+            jobID: request.id,
+            action: request.action,
+            promptHash: String(replyText.hashValue, radix: 16),
+            assetRefs: request.assetReferences,
+            modelVersion: result.metadata.model,
+            metadata: auditMetadata(for: context, module: module)
+        )
+        await dependencies.auditRepository.record(auditEntry)
+        return replyText
+    }
+
+    private func replaceMessage(id: UUID, with newMessage: AIChatMessage) {
+        if let index = messages.firstIndex(where: { $0.id == id }) {
+            messages[index] = newMessage
+        } else {
+            messages.append(newMessage)
         }
     }
 
@@ -388,6 +519,45 @@ private struct AIChatSidebarView: View {
         }
     }
 
+    private func contextModeText(for context: ChatContext) -> String {
+        switch context {
+        case .general:
+            return "模式：自由聊天"
+        case .script:
+            return "模式：文本建议（不自动写入）"
+        case .storyboard:
+            return "模式：分镜操作 · AI 结果会写入分镜表"
+        case .scriptProject:
+            return "模式：项目总结（自动写入侧边栏）"
+        }
+    }
+
+    private func contextStatusText(for context: ChatContext) -> String {
+        switch context {
+        case .general:
+            switch navigationStore.selection {
+            case .script:
+                return "上下文：剧本 · 未选择剧集"
+            case .storyboard:
+                return "上下文：分镜 · 未选择剧集"
+            default:
+                return "上下文：主页聊天"
+            }
+        case .script(_, let episode):
+            return "上下文：剧本 · \(episode.displayLabel)"
+        case .storyboard(_, let episode, let scene, let snapshot, let workspace):
+            let count = workspace?.entries.count ?? 0
+            var base = "上下文：分镜 · \(episode.displayLabel)"
+            if let title = scene?.title ?? snapshot?.title {
+                base += " · \(title)"
+            }
+            base += " · \(count) 镜头"
+            return base
+        case .scriptProject(let project):
+            return "上下文：项目 · \(project.title)"
+        }
+    }
+
     private var activeContext: ChatContext {
         switch navigationStore.selection {
         case .script:
@@ -399,7 +569,9 @@ private struct AIChatSidebarView: View {
                let episode = scriptEpisode(for: episodeID) {
                 let project = project(for: episode.id)
                 let workspace = storyboardStore.workspace(for: episodeID)
-                return .storyboard(project: project, episode: episode, workspace: workspace)
+                let scene = episode.scenes.first(where: { $0.id == navigationStore.currentStoryboardSceneID })
+                let snapshot = navigationStore.currentStoryboardSceneSnapshot
+                return .storyboard(project: project, episode: episode, scene: scene, snapshot: snapshot, workspace: workspace)
             }
         default:
             break
@@ -415,58 +587,38 @@ private struct AIChatSidebarView: View {
             return .script
         case .storyboard:
             return .storyboard
+        case .scriptProject:
+            return .scriptProjectSummary
         }
     }
 
     private var contextStatusText: String {
-        switch activeContext {
-        case .general:
-            switch navigationStore.selection {
-            case .script:
-                return "上下文：剧本 · 未选择剧集"
-            case .storyboard:
-                return "上下文：分镜 · 未选择剧集"
-            default:
-                return "上下文：主页聊天"
-            }
-        case .script(_, let episode):
-            return "上下文：剧本 · \(episode.displayLabel)"
-        case .storyboard(_, let episode, let workspace):
-            let count = workspace?.entries.count ?? 0
-            return "上下文：分镜 · \(episode.displayLabel) · \(count) 镜头"
-        }
+        contextStatusText(for: activeContext)
     }
     
     private var contextModeText: String {
-        switch activeContext {
-        case .general:
-            return "模式：自由聊天"
-        case .script:
-            return "模式：文本建议（不自动写入）"
-        case .storyboard:
-            return "模式：分镜操作 · AI 结果会写入分镜表"
-        }
+        contextModeText(for: activeContext)
     }
 
     private func makeRequestFields(for prompt: String) -> [String: String] {
-        var fields: [String: String] = [
-            "prompt": prompt,
-            "contextSummary": contextStatusText
-        ]
-        let systemPrompt = promptLibraryStore.document(for: activePromptModule)
+        makeRequestFields(prompt: prompt, context: activeContext, module: activePromptModule)
+    }
+
+    private func makeRequestFields(
+        prompt: String,
+        context: ChatContext,
+        module: PromptDocument.Module
+    ) -> [String: String] {
+        let systemPrompt = promptLibraryStore.document(for: module)
             .content.trimmingCharacters(in: .whitespacesAndNewlines)
-        if systemPrompt.isEmpty == false {
-            fields["systemPrompt"] = systemPrompt
-        }
-        let extras = contextFields(for: activeContext)
-        extras.forEach { key, value in
-            guard value.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty == false else { return }
-            fields[key] = value
-        }
-        if case .storyboard = activeContext {
-            fields["responseFormat"] = StoryboardResponseParser.responseFormatHint
-        }
-        return fields
+        let summary = contextStatusText(for: context)
+        return AIChatRequestBuilder.makeFields(
+            prompt: prompt,
+            context: context,
+            module: module,
+            systemPrompt: systemPrompt.isEmpty ? nil : systemPrompt,
+            statusText: summary
+        )
     }
 
     private func contextFields(for context: ChatContext) -> [String: String] {
@@ -477,14 +629,23 @@ private struct AIChatSidebarView: View {
             return [
                 "scriptContext": makeScriptContext(episode: episode, project: project)
             ]
-        case .storyboard(let project, let episode, let workspace):
+        case .storyboard(let project, let episode, let scene, let snapshot, let workspace):
             var payload: [String: String] = [
                 "scriptContext": makeScriptContext(episode: episode, project: project)
             ]
+            if let scene {
+                payload["sceneContext"] = makeSceneContext(scene: scene)
+            } else if let snapshot {
+                payload["sceneContext"] = makeSceneContext(snapshot: snapshot)
+            }
             if let storyboardSummary = makeStoryboardContext(workspace: workspace) {
                 payload["storyboardContext"] = storyboardSummary
             }
             return payload
+        case .scriptProject(let project):
+            return [
+                "projectContext": makeProjectContext(project: project)
+            ]
         }
     }
 
@@ -539,6 +700,111 @@ private struct AIChatSidebarView: View {
         return blocks.joined(separator: "\n\n")
     }
 
+    private func makeSceneContext(scene: ScriptScene) -> String {
+        makeSceneContext(
+            title: scene.title,
+            order: scene.order,
+            summary: scene.summary,
+            body: scene.body
+        )
+    }
+
+    private func makeSceneContext(snapshot: StoryboardSceneContextSnapshot) -> String {
+        makeSceneContext(
+            title: snapshot.title,
+            order: snapshot.order,
+            summary: snapshot.summary,
+            body: snapshot.body
+        )
+    }
+
+    private func makeSceneContext(title: String, order: Int?, summary: String, body: String) -> String {
+        var lines: [String] = []
+        if let order {
+            lines.append("场景：\(title) · 序号 \(order)")
+        } else {
+            lines.append("场景：\(title)")
+        }
+        if summary.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty == false {
+            lines.append("摘要：\(summary)")
+        }
+        let normalizedBody = sanitizedBody(body, limit: 3000)
+        lines.append("正文：\n\(normalizedBody)")
+        return lines.joined(separator: "\n")
+    }
+
+    private func makeProjectContext(project: ScriptProject) -> String {
+        var lines: [String] = []
+        lines.append("项目：\(project.title)")
+        lines.append("类型：\(project.type.displayName)")
+        if project.tags.isEmpty == false {
+            lines.append("标签：\(project.tags.joined(separator: "｜"))")
+        }
+        if project.productionStartDate != nil || project.productionEndDate != nil {
+            let formatter = DateFormatter()
+            formatter.dateStyle = .medium
+            formatter.timeStyle = .none
+            let startText = project.productionStartDate.map { formatter.string(from: $0) }
+            let endText = project.productionEndDate.map { formatter.string(from: $0) }
+            if let startText, let endText {
+                lines.append("制作周期：\(startText) - \(endText)")
+            } else if let startText {
+                lines.append("制作周期：自 \(startText)")
+            } else if let endText {
+                lines.append("制作周期：截至 \(endText)")
+            }
+        }
+        if project.synopsis.isEmpty == false {
+            lines.append("项目简介：\(project.synopsis)")
+        }
+        if project.mainCharacters.isEmpty == false {
+            lines.append("主要角色：")
+            for character in project.mainCharacters.prefix(5) {
+                let desc = character.description.isEmpty ? "暂无简介" : character.description
+                lines.append("• \(character.name.isEmpty ? "未命名" : character.name)：\(desc)")
+            }
+        }
+        if project.keyScenes.isEmpty == false {
+            lines.append("主要场景：")
+            for scene in project.keyScenes.prefix(5) {
+                let desc = scene.description.isEmpty ? "暂无描述" : scene.description
+                lines.append("• \(scene.name.isEmpty ? "未命名场景" : scene.name)：\(desc)")
+            }
+        }
+        if project.notes.isEmpty == false {
+            lines.append("备注：\(project.notes)")
+        }
+        let episodes = project.orderedEpisodes
+        if episodes.isEmpty == false {
+            lines.append("")
+            lines.append("剧集/章节概览：")
+            let maxEpisodes = min(4, episodes.count)
+            for episode in episodes.prefix(maxEpisodes) {
+                lines.append("—— \(episode.displayLabel)")
+                if episode.synopsis.isEmpty == false {
+                    lines.append("   摘要：\(episode.synopsis)")
+                }
+                if episode.scenes.isEmpty == false {
+                    let sortedScenes = episode.scenes.sorted { $0.order < $1.order }
+                    for scene in sortedScenes.prefix(3) {
+                        let snippet = sanitizedBody(scene.body, limit: 600)
+                        lines.append("   · 场景 \(scene.order)：\(scene.title) — \(snippet)")
+                    }
+                    if sortedScenes.count > 3 {
+                        lines.append("   · ……其余 \(sortedScenes.count - 3) 个场景略。")
+                    }
+                } else {
+                    let body = sanitizedBody(episode.markdown, limit: 1500)
+                    lines.append("   正文节选：\(body)")
+                }
+            }
+            if episodes.count > maxEpisodes {
+                lines.append("……其余 \(episodes.count - maxEpisodes) 集未展开。")
+            }
+        }
+        return lines.joined(separator: "\n")
+    }
+
     private func scriptEpisode(for id: UUID?) -> ScriptEpisode? {
         guard let id else { return nil }
         return scriptStore.episodes.first(where: { $0.id == id })
@@ -562,11 +828,23 @@ private struct AIChatSidebarView: View {
         return "\(prefixText)…（已截断）"
     }
 
-    private enum ChatContext {
-        case general
-        case script(project: ScriptProject?, episode: ScriptEpisode)
-        case storyboard(project: ScriptProject?, episode: ScriptEpisode, workspace: StoryboardWorkspace?)
+}
+
+extension AIChatSidebarView {
+    private func auditMetadata(for context: ChatContext, module: PromptDocument.Module) -> [String: String] {
+        [
+            "source": "AIChat",
+            "context": contextStatusText(for: context),
+            "module": module.rawValue
+        ]
     }
+}
+
+enum ChatContext: Equatable {
+    case general
+    case script(project: ScriptProject?, episode: ScriptEpisode)
+    case storyboard(project: ScriptProject?, episode: ScriptEpisode, scene: ScriptScene?, snapshot: StoryboardSceneContextSnapshot?, workspace: StoryboardWorkspace?)
+    case scriptProject(project: ScriptProject)
 }
 
 private struct ChatBubble: View {
@@ -657,12 +935,13 @@ private struct AIChatMessage: Identifiable {
         }
     }
 
-    let id = UUID()
+    let id: UUID
     let role: Role
     let text: String
     let detail: String?
 
-    init(role: Role, text: String, detail: String? = nil) {
+    init(id: UUID = UUID(), role: Role, text: String, detail: String? = nil) {
+        self.id = id
         self.role = role
         self.text = text
         self.detail = detail

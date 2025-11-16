@@ -14,19 +14,51 @@ struct ScriptScene: Identifiable, Codable, Hashable {
     var title: String
     var summary: String
     var body: String
+    var locationHint: String
+    var timeHint: String
+
+    enum CodingKeys: String, CodingKey {
+        case id, order, title, summary, body, locationHint, timeHint
+    }
 
     init(
         id: UUID = UUID(),
         order: Int,
         title: String,
         summary: String = "",
-        body: String = ""
+        body: String = "",
+        locationHint: String = "",
+        timeHint: String = ""
     ) {
         self.id = id
         self.order = order
         self.title = title
         self.summary = summary
         self.body = body
+        self.locationHint = locationHint
+        self.timeHint = timeHint
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        id = try container.decode(UUID.self, forKey: .id)
+        order = try container.decode(Int.self, forKey: .order)
+        title = try container.decode(String.self, forKey: .title)
+        summary = try container.decodeIfPresent(String.self, forKey: .summary) ?? ""
+        body = try container.decodeIfPresent(String.self, forKey: .body) ?? ""
+        locationHint = try container.decodeIfPresent(String.self, forKey: .locationHint) ?? ""
+        timeHint = try container.decodeIfPresent(String.self, forKey: .timeHint) ?? ""
+    }
+
+    func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(id, forKey: .id)
+        try container.encode(order, forKey: .order)
+        try container.encode(title, forKey: .title)
+        try container.encode(summary, forKey: .summary)
+        try container.encode(body, forKey: .body)
+        try container.encode(locationHint, forKey: .locationHint)
+        try container.encode(timeHint, forKey: .timeHint)
     }
 }
 
@@ -66,6 +98,30 @@ struct ScriptEpisode: Identifiable, Codable, Hashable {
     }
 }
 
+struct ProjectCharacterProfile: Identifiable, Codable, Hashable {
+    let id: UUID
+    var name: String
+    var description: String
+
+    init(id: UUID = UUID(), name: String = "", description: String = "") {
+        self.id = id
+        self.name = name
+        self.description = description
+    }
+}
+
+struct ProjectSceneProfile: Identifiable, Codable, Hashable {
+    let id: UUID
+    var name: String
+    var description: String
+
+    init(id: UUID = UUID(), name: String = "", description: String = "") {
+        self.id = id
+        self.name = name
+        self.description = description
+    }
+}
+
 struct ScriptProject: Identifiable, Codable, Hashable {
     enum ProjectType: String, Codable, CaseIterable, Identifiable {
         case standalone
@@ -86,6 +142,11 @@ struct ScriptProject: Identifiable, Codable, Hashable {
     var synopsis: String
     var tags: [String]
     var type: ProjectType
+    var productionStartDate: Date?
+    var productionEndDate: Date?
+    var notes: String
+    var mainCharacters: [ProjectCharacterProfile]
+    var keyScenes: [ProjectSceneProfile]
     var createdAt: Date
     var updatedAt: Date
     var episodes: [ScriptEpisode]
@@ -96,6 +157,11 @@ struct ScriptProject: Identifiable, Codable, Hashable {
         synopsis: String = "",
         tags: [String] = [],
         type: ProjectType = .standalone,
+        productionStartDate: Date? = nil,
+        productionEndDate: Date? = nil,
+        notes: String = "",
+        mainCharacters: [ProjectCharacterProfile] = [],
+        keyScenes: [ProjectSceneProfile] = [],
         createdAt: Date = .now,
         updatedAt: Date = .now,
         episodes: [ScriptEpisode] = []
@@ -105,9 +171,52 @@ struct ScriptProject: Identifiable, Codable, Hashable {
         self.synopsis = synopsis
         self.tags = tags
         self.type = type
+        self.productionStartDate = productionStartDate
+        self.productionEndDate = productionEndDate
+        self.notes = notes
+        self.mainCharacters = mainCharacters
+        self.keyScenes = keyScenes
         self.createdAt = createdAt
         self.updatedAt = updatedAt
         self.episodes = episodes
+    }
+
+    enum CodingKeys: String, CodingKey {
+        case id, title, synopsis, tags, type, productionStartDate, productionEndDate, notes, mainCharacters, keyScenes, createdAt, updatedAt, episodes
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        id = try container.decode(UUID.self, forKey: .id)
+        title = try container.decode(String.self, forKey: .title)
+        synopsis = try container.decode(String.self, forKey: .synopsis)
+        tags = try container.decodeIfPresent([String].self, forKey: .tags) ?? []
+        type = try container.decode(ProjectType.self, forKey: .type)
+        productionStartDate = try container.decodeIfPresent(Date.self, forKey: .productionStartDate)
+        productionEndDate = try container.decodeIfPresent(Date.self, forKey: .productionEndDate)
+        notes = try container.decodeIfPresent(String.self, forKey: .notes) ?? ""
+        mainCharacters = try container.decodeIfPresent([ProjectCharacterProfile].self, forKey: .mainCharacters) ?? []
+        keyScenes = try container.decodeIfPresent([ProjectSceneProfile].self, forKey: .keyScenes) ?? []
+        createdAt = try container.decode(Date.self, forKey: .createdAt)
+        updatedAt = try container.decode(Date.self, forKey: .updatedAt)
+        episodes = try container.decodeIfPresent([ScriptEpisode].self, forKey: .episodes) ?? []
+    }
+
+    func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(id, forKey: .id)
+        try container.encode(title, forKey: .title)
+        try container.encode(synopsis, forKey: .synopsis)
+        try container.encode(tags, forKey: .tags)
+        try container.encode(type, forKey: .type)
+        try container.encode(productionStartDate, forKey: .productionStartDate)
+        try container.encode(productionEndDate, forKey: .productionEndDate)
+        try container.encode(notes, forKey: .notes)
+        try container.encode(mainCharacters, forKey: .mainCharacters)
+        try container.encode(keyScenes, forKey: .keyScenes)
+        try container.encode(createdAt, forKey: .createdAt)
+        try container.encode(updatedAt, forKey: .updatedAt)
+        try container.encode(episodes, forKey: .episodes)
     }
 
     var orderedEpisodes: [ScriptEpisode] {
@@ -133,6 +242,13 @@ final class ScriptStore: ObservableObject {
     init() {
         storageURL = ScriptStore.makeStorageURL()
         projects = ScriptStore.load(from: storageURL)
+        projects = projects.map { project in
+            var copy = project
+            for idx in copy.episodes.indices {
+                normalizeScenes(in: &copy.episodes[idx])
+            }
+            return copy
+        }
         rebuildEpisodesCache()
     }
 
@@ -191,6 +307,7 @@ final class ScriptStore: ObservableObject {
             markdown: markdown
         )
         episode.synopsis = makeSynopsis(from: markdown)
+        normalizeScenes(in: &episode)
         projects[index].episodes.append(episode)
         projects[index].updatedAt = .now
         persist()
@@ -214,6 +331,7 @@ final class ScriptStore: ObservableObject {
         guard let projectIndex = projects.firstIndex(where: { $0.id == projectID }) else { return }
         guard let episodeIndex = projects[projectIndex].episodes.firstIndex(where: { $0.id == episodeID }) else { return }
         update(&projects[projectIndex].episodes[episodeIndex])
+        normalizeScenes(in: &projects[projectIndex].episodes[episodeIndex])
         projects[projectIndex].episodes[episodeIndex].updatedAt = .now
         projects[projectIndex].updatedAt = .now
         persist()
@@ -232,6 +350,68 @@ final class ScriptStore: ObservableObject {
             let project = project(id: projectID)
         else { return nil }
         return project.episodes.first(where: { $0.id == episodeID })
+    }
+
+    func addScene(
+        to projectID: UUID,
+        episodeID: UUID,
+        title: String,
+        locationHint: String = "",
+        timeHint: String = ""
+    ) -> ScriptScene? {
+        var newSceneID: UUID?
+        updateEpisode(projectID: projectID, episodeID: episodeID) { episode in
+            let nextOrder = (episode.scenes.map(\.order).max() ?? 0) + 1
+            var scene = ScriptScene(
+                order: nextOrder,
+                title: title.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? "未命名场景 \(nextOrder)" : title,
+                summary: "",
+                body: "",
+                locationHint: locationHint.trimmingCharacters(in: .whitespacesAndNewlines),
+                timeHint: timeHint.trimmingCharacters(in: .whitespacesAndNewlines)
+            )
+            scene.summary = makeSynopsis(from: scene.body)
+            episode.scenes.append(scene)
+            newSceneID = scene.id
+        }
+        guard let id = newSceneID else { return nil }
+        return episode(projectID: projectID, episodeID: episodeID)?.scenes.first(where: { $0.id == id })
+    }
+
+    func updateSceneTitle(projectID: UUID, episodeID: UUID, sceneID: UUID, title: String) {
+        updateEpisode(projectID: projectID, episodeID: episodeID) { episode in
+            guard let index = episode.scenes.firstIndex(where: { $0.id == sceneID }) else { return }
+            episode.scenes[index].title = title
+        }
+    }
+
+    func updateSceneBody(projectID: UUID, episodeID: UUID, sceneID: UUID, body: String) {
+        updateEpisode(projectID: projectID, episodeID: episodeID) { episode in
+            guard let index = episode.scenes.firstIndex(where: { $0.id == sceneID }) else { return }
+            episode.scenes[index].body = body
+            episode.scenes[index].summary = makeSynopsis(from: body)
+        }
+    }
+
+    func updateSceneLocationHint(projectID: UUID, episodeID: UUID, sceneID: UUID, hint: String) {
+        updateEpisode(projectID: projectID, episodeID: episodeID) { episode in
+            guard let index = episode.scenes.firstIndex(where: { $0.id == sceneID }) else { return }
+            episode.scenes[index].locationHint = hint.trimmingCharacters(in: .whitespacesAndNewlines)
+        }
+    }
+
+    func updateSceneTimeHint(projectID: UUID, episodeID: UUID, sceneID: UUID, hint: String) {
+        updateEpisode(projectID: projectID, episodeID: episodeID) { episode in
+            guard let index = episode.scenes.firstIndex(where: { $0.id == sceneID }) else { return }
+            episode.scenes[index].timeHint = hint.trimmingCharacters(in: .whitespacesAndNewlines)
+        }
+    }
+
+    func deleteScene(projectID: UUID, episodeID: UUID, sceneID: UUID) {
+        updateEpisode(projectID: projectID, episodeID: episodeID) { episode in
+            guard episode.scenes.count > 1 else { return }
+            episode.scenes.removeAll { $0.id == sceneID }
+        }
     }
 
     func nextEpisodeNumber(for projectID: UUID) -> Int {
@@ -272,6 +452,32 @@ final class ScriptStore: ObservableObject {
         let trimmed = markdown.trimmingCharacters(in: .whitespacesAndNewlines)
         guard trimmed.isEmpty == false else { return "" }
         return String(trimmed.prefix(320))
+    }
+
+    private func normalizeScenes(in episode: inout ScriptEpisode) {
+        if episode.scenes.isEmpty {
+            let body = episode.markdown
+            var scene = ScriptScene(order: 1, title: "未命名场景 1", summary: "", body: body)
+            scene.summary = makeSynopsis(from: body)
+            episode.scenes = [scene]
+        }
+        episode.scenes.sort { $0.order < $1.order }
+        for index in episode.scenes.indices {
+            episode.scenes[index].order = index + 1
+            if episode.scenes[index].title.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                episode.scenes[index].title = "未命名场景 \(index + 1)"
+            }
+            episode.scenes[index].summary = makeSynopsis(from: episode.scenes[index].body)
+        }
+        episode.markdown = composeMarkdown(from: episode.scenes)
+        episode.synopsis = makeSynopsis(from: episode.markdown)
+    }
+
+    private func composeMarkdown(from scenes: [ScriptScene]) -> String {
+        scenes
+            .sorted { $0.order < $1.order }
+            .map { $0.body }
+            .joined(separator: "\n\n")
     }
 }
 

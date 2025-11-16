@@ -49,14 +49,25 @@ struct StoryboardView: View {
         }
         .onAppear {
             navigationStore.currentStoryboardEpisodeID = store.selectedEpisodeID
+            navigationStore.currentStoryboardSceneID = store.selectedSceneID
+            syncSceneSnapshot()
             navigationStore.storyboardAutomationHandler = store
         }
         .onReceive(store.$selectedEpisode) { episode in
             navigationStore.currentStoryboardEpisodeID = episode?.id
         }
+        .onReceive(store.$selectedSceneID) { sceneID in
+            navigationStore.currentStoryboardSceneID = sceneID
+            syncSceneSnapshot()
+        }
+        .onReceive(store.$scenes) { _ in
+            syncSceneSnapshot()
+        }
         .onDisappear {
             if navigationStore.selection != .storyboard {
                 navigationStore.currentStoryboardEpisodeID = nil
+                navigationStore.currentStoryboardSceneID = nil
+                navigationStore.currentStoryboardSceneSnapshot = nil
             }
             if navigationStore.storyboardAutomationHandler === store {
                 navigationStore.storyboardAutomationHandler = nil
@@ -67,6 +78,7 @@ struct StoryboardView: View {
     private var selectionSummary: some View {
         VStack(alignment: .leading, spacing: 8) {
             HStack(spacing: 16) {
+                Label(store.selectedProjectDisplay, systemImage: "square.grid.2x2")
                 Label(store.selectedEpisodeDisplay, systemImage: "film")
                 if let savedAt = store.lastSavedAt {
                     Label("已保存：\(savedAt.formatted(date: .numeric, time: .shortened))", systemImage: "clock")
@@ -94,11 +106,6 @@ struct StoryboardView: View {
                         VStack(alignment: .leading, spacing: 4) {
                             Text(scene.title)
                                 .font(.title2.bold())
-                            if scene.summary.isEmpty == false {
-                                Text(scene.summary)
-                                    .font(.subheadline)
-                                    .foregroundStyle(.secondary)
-                            }
                             Text(scene.countDescription)
                                 .font(.caption)
                                 .foregroundStyle(.secondary)
@@ -146,13 +153,22 @@ struct StoryboardView: View {
                         .shadow(color: .black.opacity(0.08), radius: 18, y: 8)
                 )
             } else {
-                placeholder("暂无场景。请先通过 AI 生成或点击“新增分镜”创建首个镜头。")
+                placeholder("暂无场景。请先在“剧本”模块添加场景，再回到此处生成分镜。")
             }
         }
     }
 
     private func toolbarContent() -> some ToolbarContent {
         ToolbarItemGroup {
+            Picker("项目", selection: projectSelectionBinding) {
+                ForEach(store.projects) { project in
+                    Text(project.title).tag(Optional(project.id))
+                }
+            }
+            .labelsHidden()
+            .frame(width: 200)
+            .disabled(store.projects.isEmpty)
+
             Picker("剧集", selection: Binding(
                 get: { store.selectedEpisodeID },
                 set: { store.selectEpisode(id: $0) }
@@ -174,16 +190,6 @@ struct StoryboardView: View {
                 .frame(width: 150)
             }
 
-            if store.entriesForSelectedScene.isEmpty == false {
-                Picker("镜头", selection: entrySelectionBinding) {
-                    ForEach(store.entriesForSelectedScene) { entry in
-                        Text("镜 \(entry.fields.shotNumber)").tag(Optional(entry.id))
-                    }
-                }
-                .labelsHidden()
-                .frame(width: 140)
-            }
-
             Menu {
                 ForEach(StoryboardExportFormat.allCases) { format in
                     Button(format.displayName) {
@@ -197,7 +203,14 @@ struct StoryboardView: View {
         }
     }
 
-    private var sceneSelectionBinding: Binding<String?> {
+    private var projectSelectionBinding: Binding<UUID?> {
+        Binding(
+            get: { store.selectedProjectID },
+            set: { store.selectProject(id: $0) }
+        )
+    }
+
+    private var sceneSelectionBinding: Binding<UUID?> {
         Binding(
             get: { store.selectedSceneID },
             set: { store.selectScene(id: $0) }
@@ -217,6 +230,20 @@ struct StoryboardView: View {
         let nextIndex = store.scenes.index(after: index)
         let target = nextIndex < store.scenes.count ? store.scenes[nextIndex] : store.scenes.first
         store.selectScene(id: target?.id)
+    }
+
+    private func syncSceneSnapshot() {
+        if let scene = store.currentScene {
+            navigationStore.currentStoryboardSceneSnapshot = StoryboardSceneContextSnapshot(
+                id: scene.id,
+                title: scene.title,
+                order: scene.order,
+                summary: scene.summary,
+                body: scene.body
+            )
+        } else {
+            navigationStore.currentStoryboardSceneSnapshot = nil
+        }
     }
 
     private func placeholder(_ text: String) -> some View {
@@ -269,16 +296,10 @@ private struct ShotReviewCard: View {
                 Spacer()
                 StatusBadge(status: entry.status)
             }
-
-            Text(entry.sceneTitle)
-                .font(.headline)
-            if entry.sceneSummary.isEmpty == false {
-                Text(entry.sceneSummary)
-                    .font(.subheadline)
-            }
-
-            infoRow(title: "画面描述", value: entry.fields.aiPrompt)
+            infoRow(title: "画面描述", value: entry.fields.visualSummary.isEmpty ? entry.fields.aiPrompt : entry.fields.visualSummary)
             infoRow(title: "台词 / OS", value: entry.fields.dialogueOrOS)
+            infoRow(title: "声音 / 音效", value: entry.fields.soundDesign)
+            infoRow(title: "提示词", value: entry.fields.aiPrompt)
 
             HStack {
                 Button {

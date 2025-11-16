@@ -119,4 +119,15 @@ final class AppConfiguration: ObservableObject {
         relaySelectedModel = model
         defaults.set(model, forKey: Keys.relaySelectedModel)
     }
+
+    func relaySettingsSnapshot() -> RelaySettingsSnapshot? {
+        guard relayEnabled,
+              relayProviderType == .openai,
+              let selected = relaySelectedModel,
+              selected.isEmpty == false else { return nil }
+        let base = relayAPIBase.trimmingCharacters(in: .whitespacesAndNewlines)
+        let key = relayAPIKey.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard base.isEmpty == false, key.isEmpty == false else { return nil }
+        return RelaySettingsSnapshot(baseURL: base, apiKey: key, model: selected)
+    }
 }

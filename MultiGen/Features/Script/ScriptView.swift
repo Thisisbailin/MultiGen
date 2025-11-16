@@ -279,6 +279,34 @@ struct ScriptView: View {
                     Button(action: startImportProject) {
                         Label("导入项目", systemImage: "tray.and.arrow.down")
                     }
+
+                    Button {
+                        navigationStore.sidebarMode = .ai
+                        if let project = highlightedProject {
+                            navigationStore.pendingProjectSummaryID = project.id
+                        }
+                    } label: {
+                        Label("项目总结", systemImage: "text.alignleft")
+                    }
+                    .disabled(highlightedProject == nil)
+
+                    Button {
+                        if let project = highlightedProject {
+                            exportProjectAsWord(project)
+                        }
+                    } label: {
+                        Label("导出项目", systemImage: "square.and.arrow.up")
+                    }
+                    .disabled(highlightedProject == nil)
+
+                    Button(role: .destructive) {
+                        if let project = highlightedProject {
+                            projectPendingDeletion = project
+                        }
+                    } label: {
+                        Label("删除项目", systemImage: "trash")
+                    }
+                    .disabled(highlightedProject == nil)
                 }
             }
         }
@@ -337,6 +365,29 @@ struct ScriptView: View {
         isImportingProject = true
     }
 
+    private func exportProjectAsWord(_ project: ScriptProject) {
+        let panel = NSSavePanel()
+        let docType = UTType(filenameExtension: "doc") ?? .rtf
+        panel.allowedContentTypes = [docType]
+        panel.canCreateDirectories = true
+        panel.nameFieldStringValue = "\(project.title).doc"
+
+        guard panel.runModal() == .OK, let url = panel.url else { return }
+
+        let builder = ScriptProjectWordBuilder()
+        do {
+            let text = builder.makeDocument(for: project)
+            let attributed = NSAttributedString(string: text)
+            let data = try attributed.data(
+                from: NSRange(location: 0, length: attributed.length),
+                documentAttributes: [.documentType: NSAttributedString.DocumentType.docFormat]
+            )
+            try data.write(to: url)
+        } catch {
+            exportErrorMessage = error.localizedDescription
+        }
+    }
+
     private func handleImportResult(_ result: Result<[URL], Error>) {
         switch result {
         case .success(let urls):
@@ -380,7 +431,7 @@ struct ScriptView: View {
         }
     }
 
-    private func addScene(name: String, location: String, time: String) {
+private func addScene(name: String, location: String, time: String) {
         guard let projectID = selectedProjectID, let episodeID = selectedEpisodeID else { return }
         _ = store.addScene(
             to: projectID,
@@ -395,6 +446,89 @@ struct ScriptView: View {
         newSceneTime = ""
     }
 }
+
+private struct ScriptProjectWordBuilder {
+    private let dateFormatter: DateFormatter = {
+        let formatter = DateFormatter()
+        formatter.dateStyle = .medium
+        formatter.timeStyle = .none
+        return formatter
+    }()
+
+    func makeDocument(for project: ScriptProject) -> String {
+        var lines: [String] = []
+        lines.append(project.title)
+        lines.append(String(repeating: "=", count: max(8, project.title.count)))
+        lines.append("")
+        lines.append("项目类型：\(project.type.displayName)")
+        if let start = project.productionStartDate {
+            let startText = dateFormatter.string(from: start)
+            if let end = project.productionEndDate {
+                lines.append("制作周期：\(startText) - \(dateFormatter.string(from: end))")
+            } else {
+                lines.append("制作周期：自 \(startText)")
+            }
+        } else if let end = project.productionEndDate {
+            lines.append("制作周期：截至 \(dateFormatter.string(from: end))")
+        }
+        if project.tags.isEmpty == false {
+            lines.append("标签：\(project.tags.joined(separator: "，"))")
+        }
+        if project.synopsis.isEmpty == false {
+            lines.append("")
+            lines.append("项目简介：")
+            lines.append(project.synopsis)
+        }
+        if project.mainCharacters.isEmpty == false {
+            lines.append("")
+            lines.append("主要角色：")
+            for character in project.mainCharacters {
+                lines.append("• \(character.name.isEmpty ? "未命名角色" : character.name)：\(character.description)")
+            }
+        }
+        if project.keyScenes.isEmpty == false {
+            lines.append("")
+            lines.append("主要场景：")
+            for scene in project.keyScenes {
+                lines.append("• \(scene.name.isEmpty ? "未命名场景" : scene.name)：\(scene.description)")
+            }
+        }
+        if project.notes.isEmpty == false {
+            lines.append("")
+            lines.append("备注：")
+            lines.append(project.notes)
+        }
+
+        for episode in project.orderedEpisodes {
+            lines.append("")
+            lines.append("第\(episode.displayLabel)")
+            lines.append(String(repeating: "-", count: max(8, episode.displayLabel.count + 1)))
+            if episode.title.isEmpty == false {
+                lines.append("标题：\(episode.title)")
+            }
+            lines.append("更新时间：\(dateFormatter.string(from: episode.updatedAt))")
+            lines.append("")
+            if episode.scenes.isEmpty {
+                lines.append(episode.markdown)
+            } else {
+                let sortedScenes = episode.scenes.sorted { $0.order < $1.order }
+                for (index, scene) in sortedScenes.enumerated() {
+                    lines.append("场景 \(index + 1)：\(scene.title.isEmpty ? "未命名场景" : scene.title)")
+                    if scene.locationHint.isEmpty == false || scene.timeHint.isEmpty == false {
+                        lines.append("• 环境：\(scene.locationHint) \(scene.timeHint)")
+                    }
+                    if scene.body.isEmpty == false {
+                        lines.append(scene.body)
+                    }
+                    lines.append("")
+                }
+            }
+        }
+
+        return lines.joined(separator: "\n")
+    }
+}
+
 
 private struct SceneNameSheet: View {
     @Binding var name: String

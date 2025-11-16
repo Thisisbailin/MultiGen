@@ -42,24 +42,11 @@ struct ScriptOverviewView: View {
     }
 
     private var header: some View {
-        HStack(alignment: .center) {
-            VStack(alignment: .leading, spacing: 4) {
-                Text("剧本项目")
-                    .font(.system(.largeTitle, weight: .bold))
-                Text("以项目为单位管理集数与元信息，便于后续分镜和影像创作。")
-                    .foregroundStyle(.secondary)
-            }
-            Spacer()
-            HStack(spacing: 8) {
-                Button(action: onCreateProject) {
-                    Label("新建项目", systemImage: "square.and.pencil")
-                }
-                .buttonStyle(.borderedProminent)
-
-                Button(action: onImportProject) {
-                    Label("导入项目", systemImage: "tray.and.arrow.down")
-                }
-            }
+        VStack(alignment: .leading, spacing: 4) {
+            Text("剧本项目")
+                .font(.system(.largeTitle, weight: .bold))
+            Text("以项目为单位管理集数与元信息，便于后续分镜和影像创作。")
+                .foregroundStyle(.secondary)
         }
     }
 

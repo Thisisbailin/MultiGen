@@ -16,12 +16,17 @@
 | --- | --- | --- | --- |
 | 主页 / 其它 | 主页聊天 (`.aiConsole`) | 无 | 默认空提示词，可在资料库中自定义。 |
 | 剧本 | 剧本助手 (`.script`) | 选中剧集的 Markdown（最多 6000 字）+ 项目元数据 | `ScriptView` 将当前剧集 ID 写入 `NavigationStore.currentScriptEpisodeID`。 |
-| 分镜 | 分镜助手 (`.storyboard`) | 剧本文本 + 现有分镜（前 12 镜，含景别/运镜/台词/提示词） | `StoryboardView` 同步 `currentStoryboardEpisodeID`，并按需附加已有分镜摘要；若尚未生成分镜则该字段缺省。 |
+| 分镜 | 分镜助手 (`.storyboard`) | 剧本文本 + 当前场景正文（`sceneContext`）+ 现有分镜（前 12 镜） | `StoryboardView` 同步 episode/scene ID；若无分镜，仅携带剧本+场景上下文。 |
+
+> `sceneContext` 包含“场景标题/序号/摘要/正文”，正文会在 3000 字截断，确保 Gemini 按场景理解而非整集平均。AI 必须复用剧本里已有的场景名称，分镜不会生成新的场景层级。
+> 智能协作一次只处理当前选中的场景；当用户切换场景时，Sidebar 会自动刷新上下文并要求 AI 仅输出该场景的镜头数组（不返回额外的 sceneTitle）。
 
 > 当页面未绑定自定义提示词时，系统会回退到主页聊天提示词，确保不会出现空引用。
 
 ### 状态同步
 - `NavigationStore` 新增 `currentScriptEpisodeID` / `currentStoryboardEpisodeID`，分别由 `ScriptView` 与 `StoryboardView` 在切换剧集时更新，用于让智能协同无侵入地获取上下文。
+- `NavigationStore` 现额外记录 `currentStoryboardSceneID` 与 `currentStoryboardSceneSnapshot`，`StoryboardView` 在切换场景或离开模块时同步；AI 面板借此拼装 `sceneContext`（只有来自剧本的场景会被纳入快照，避免出现 AI 私自新增场景）。
+- Storyboard 模块的自动化仅在存在合法场景时生效；若剧本尚未添加场景，Sidebar 会提示用户先回到剧本模块拆分场景。
 - `AIChatSidebarView` 根据上述 ID 动态选择 Prompt 模块、构造 `scriptContext` / `storyboardContext` 字段，并在界面上显示当前上下文状态（如“剧本 · 第2集”）。
 - 为防止用户误改提示词导致结果异常，指令资料库提供「恢复默认」按钮，可针对单个模块回退到内置模板。
 - 分镜上下文下的聊天窗会额外显示“分镜操作 · AI 结果会写入分镜表”的模式提示，明确这是自动落地的操作型请求；剧本/主页保持“文本建议/自由聊天”描述。
@@ -32,6 +37,7 @@
    - 新增 `PromptLibraryStore` 持久化提示词。
    - 指令入口（侧边栏 → 资料库 → 指令）可查看/编辑提示词，保存后写入 `prompt-library.json`。
    - 分镜 / 智能协作在调用 Gemini 前读取各自提示词（为空则不附加 system prompt）。
+   - 分镜模块的默认 system prompt 现参考 `docs/Script_to_Storyboard_Advanced_Principles.md`，强调视觉母题、色彩脚本、空间语法、摄影机/光影/剪辑等专业原则，确保 AI 输出接近导演级分镜。
 
 2. **侧边栏与导航**
    - 侧栏顶部加入分段控制器，切换「项目」与「智能协作」模式；智能协作模式下嵌入聊天面板。

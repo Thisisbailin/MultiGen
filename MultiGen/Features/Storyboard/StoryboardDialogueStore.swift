@@ -11,13 +11,15 @@ import SwiftUI
 
 @MainActor
 final class StoryboardDialogueStore: ObservableObject {
+    @Published private(set) var projects: [ScriptProject] = []
     @Published private(set) var episodes: [ScriptEpisode] = []
     @Published private(set) var selectedEpisode: ScriptEpisode?
+    @Published var selectedProjectID: UUID?
     @Published private(set) var workspace: StoryboardWorkspace?
     @Published private(set) var entries: [StoryboardEntry] = []
     @Published private(set) var turns: [StoryboardDialogueTurn] = []
     @Published private(set) var scenes: [StoryboardSceneViewModel] = []
-    @Published var selectedSceneID: String?
+    @Published var selectedSceneID: UUID?
     @Published var focusedEntryID: UUID?
     @Published var selectedEntryID: UUID?
     @Published var errorMessage: String?
@@ -37,13 +39,24 @@ final class StoryboardDialogueStore: ObservableObject {
         self.scriptStore = scriptStore
         self.storyboardStore = storyboardStore
 
-        episodes = scriptStore.episodes
+        projects = scriptStore.projects
+        selectedProjectID = projects.first?.id
+        episodes = projects.first?.orderedEpisodes ?? []
         observeStores()
-        refreshWorkspaceSnapshot()
+        if let firstEpisode = episodes.first {
+            selectEpisode(id: firstEpisode.id)
+        } else {
+            selectEpisode(id: nil)
+        }
     }
 
     var selectedEpisodeID: UUID? {
         selectedEpisode?.id
+    }
+
+    var selectedProject: ScriptProject? {
+        guard let id = selectedProjectID else { return nil }
+        return projects.first(where: { $0.id == id })
     }
 
     var focusedEntry: StoryboardEntry? {
@@ -77,6 +90,10 @@ final class StoryboardDialogueStore: ObservableObject {
         selectedEpisode?.displayLabel ?? "请选择剧集"
     }
 
+    var selectedProjectDisplay: String {
+        selectedProject?.title ?? "请选择项目"
+    }
+
     var selectedSceneDisplay: String {
         currentScene?.title ?? "未选择场景"
     }
@@ -84,6 +101,26 @@ final class StoryboardDialogueStore: ObservableObject {
     var selectedShotDisplay: String {
         guard let entry = selectedEntry else { return "未选择镜头" }
         return "镜 \(entry.fields.shotNumber)"
+    }
+
+    func selectProject(id: UUID?) {
+        if selectedProjectID == id, let id { 
+            if let project = projects.first(where: { $0.id == id }) {
+                episodes = project.orderedEpisodes
+            }
+            return
+        }
+        selectedProjectID = id
+        guard let id, let project = projects.first(where: { $0.id == id }) else {
+            episodes = []
+            selectEpisode(id: nil)
+            return
+        }
+        episodes = project.orderedEpisodes
+        if let current = selectedEpisode,
+           project.episodes.contains(where: { $0.id == current.id }) == false {
+            selectEpisode(id: project.orderedEpisodes.first?.id)
+        }
     }
 
     func selectEpisode(id: UUID?) {
@@ -99,7 +136,14 @@ final class StoryboardDialogueStore: ObservableObject {
             return
         }
 
-        guard let episode = scriptStore.episodes.first(where: { $0.id == id }) else { return }
+        guard
+            let project = projects.first(where: { $0.episodes.contains(where: { $0.id == id }) }),
+            let episode = project.episodes.first(where: { $0.id == id })
+        else { return }
+        if selectedProjectID != project.id {
+            selectedProjectID = project.id
+            episodes = project.orderedEpisodes
+        }
         selectedEpisode = episode
         workspace = storyboardStore.ensureWorkspace(for: episode)
         entries = workspace?.orderedEntries ?? []
@@ -116,7 +160,7 @@ final class StoryboardDialogueStore: ObservableObject {
         }
     }
 
-    func selectScene(id: String?) {
+    func selectScene(id: UUID?) {
         let target = id ?? scenes.first?.id
         selectedSceneID = target
         if let target,
@@ -148,6 +192,10 @@ final class StoryboardDialogueStore: ObservableObject {
             errorMessage = "请选择剧集后再新增分镜。"
             return
         }
+        guard let sceneDetails = targetSceneDetails() else {
+            errorMessage = "请先在剧本模块创建至少一个场景。"
+            return
+        }
         let nextShot = (entries.map(\.fields.shotNumber).max() ?? 0) + 1
         var entry = StoryboardEntry(
             episodeID: episode.id,
@@ -158,8 +206,9 @@ final class StoryboardDialogueStore: ObservableObject {
         )
         entry.createdAt = .now
         entry.updatedAt = .now
-        entry.sceneTitle = currentScene?.title ?? "未命名场景"
-        entry.sceneSummary = currentScene?.summary ?? ""
+        entry.sceneTitle = sceneDetails.title
+        entry.sceneSummary = sceneDetails.summary
+        entry.sceneID = sceneDetails.id
         entries.append(entry)
         entries.sort { $0.fields.shotNumber < $1.fields.shotNumber }
         selectedEntryID = entry.id
@@ -224,11 +273,10 @@ final class StoryboardDialogueStore: ObservableObject {
     }
 
     private func observeStores() {
-        scriptStore.$episodes
+        scriptStore.$projects
             .receive(on: RunLoop.main)
-            .sink { [weak self] episodes in
-                self?.episodes = episodes
-                self?.handleEpisodeListUpdate()
+            .sink { [weak self] projects in
+                self?.handleProjectListUpdate(projects)
             }
             .store(in: &cancellables)
 
@@ -240,10 +288,28 @@ final class StoryboardDialogueStore: ObservableObject {
             .store(in: &cancellables)
     }
 
-    private func handleEpisodeListUpdate() {
-        guard let selected = selectedEpisode else { return }
-        if episodes.contains(where: { $0.id == selected.id }) == false {
+    private func handleProjectListUpdate(_ projects: [ScriptProject]) {
+        self.projects = projects
+        guard projects.isEmpty == false else {
+            selectedProjectID = nil
+            episodes = []
             selectEpisode(id: nil)
+            return
+        }
+        if let projectID = selectedProjectID,
+           let project = projects.first(where: { $0.id == projectID }) {
+            episodes = project.orderedEpisodes
+            if let selected = selectedEpisode,
+               let updated = project.episodes.first(where: { $0.id == selected.id }) {
+                selectedEpisode = updated
+                rebuildScenes()
+            } else {
+                selectEpisode(id: project.orderedEpisodes.first?.id)
+            }
+        } else {
+            selectedProjectID = projects.first?.id
+            episodes = projects.first?.orderedEpisodes ?? []
+            selectEpisode(id: episodes.first?.id)
         }
     }
 
@@ -273,6 +339,11 @@ final class StoryboardDialogueStore: ObservableObject {
         episode: ScriptEpisode,
         sourceTurnID: UUID
     ) -> [UUID] {
+        guard let sceneDetails = targetSceneDetails() else {
+            parserWarning = "未找到可用场景。请在剧本模块新增场景后再试。"
+            return []
+        }
+
         let currentEntries = entries
         let nextShot = (currentEntries.map(\.fields.shotNumber).max() ?? 0) + 1
         let parsed = parser.parseEntries(from: assistantText, nextShotNumber: nextShot)
@@ -283,7 +354,7 @@ final class StoryboardDialogueStore: ObservableObject {
         var touchedIDs: [UUID] = []
 
         for parsedEntry in parsed {
-            var fields = parsedEntry.fields
+            let fields = parsedEntry.fields
             if let index = updatedEntries.firstIndex(where: { $0.fields.shotNumber == fields.shotNumber }) {
                 var entry = updatedEntries[index]
                 entry.version += 1
@@ -291,6 +362,9 @@ final class StoryboardDialogueStore: ObservableObject {
                 entry.status = .pendingReview
                 entry.lastTurnID = sourceTurnID
                 entry.updatedAt = .now
+                entry.sceneID = sceneDetails.id
+                entry.sceneTitle = sceneDetails.title
+                entry.sceneSummary = sceneDetails.summary
                 let revision = StoryboardRevision(
                     version: entry.version,
                     authorRole: .assistant,
@@ -299,16 +373,9 @@ final class StoryboardDialogueStore: ObservableObject {
                     sourceTurnID: sourceTurnID
                 )
                 entry.revisions.append(revision)
-                if let sceneTitle = parsedEntry.sceneTitle, sceneTitle.isEmpty == false {
-                    entry.sceneTitle = sceneTitle
-                }
-                if let sceneSummary = parsedEntry.sceneSummary, sceneSummary.isEmpty == false {
-                    entry.sceneSummary = sceneSummary
-                }
                 updatedEntries[index] = entry
                 touchedIDs.append(entry.id)
             } else {
-                let sceneTitle = parsedEntry.sceneTitle ?? currentScene?.title ?? "未命名场景"
                 var entry = StoryboardEntry(
                     episodeID: episode.id,
                     fields: fields,
@@ -325,9 +392,10 @@ final class StoryboardDialogueStore: ObservableObject {
                         )
                     ],
                     lastTurnID: sourceTurnID,
-                    sceneTitle: sceneTitle,
-                    sceneSummary: parsedEntry.sceneSummary ?? currentScene?.summary ?? ""
+                    sceneTitle: sceneDetails.title,
+                    sceneSummary: sceneDetails.summary
                 )
+                entry.sceneID = sceneDetails.id
                 entry.createdAt = .now
                 entry.updatedAt = .now
                 updatedEntries.append(entry)
@@ -382,52 +450,93 @@ final class StoryboardDialogueStore: ObservableObject {
     }
 
     private func rebuildScenes() {
-        let previousScenes = scenes
-        let previousSelectionID = selectedSceneID
-        let previousSelectionTitle = previousScenes.first(where: { $0.id == previousSelectionID })?.title
-
-        let grouped = Dictionary(grouping: entries) { entry -> String in
-            let title = entry.sceneTitle.trimmingCharacters(in: .whitespacesAndNewlines)
-            return title.isEmpty ? "未命名场景" : title
+        guard let episode = selectedEpisode else {
+            scenes = []
+            return
         }
-
-        scenes = grouped.map { title, entries in
-            let sortedEntries = entries.sorted {
-                if $0.fields.shotNumber == $1.fields.shotNumber {
-                    return $0.createdAt < $1.createdAt
+        let scriptScenes = episode.scenes.sorted { $0.order < $1.order }
+        var mutatedEntries = entries
+        var didMutate = false
+        let fallbackScene = scriptScenes.first
+        for idx in mutatedEntries.indices {
+            if
+                let sceneID = mutatedEntries[idx].sceneID,
+                let scriptScene = scriptScenes.first(where: { $0.id == sceneID })
+            {
+                if mutatedEntries[idx].sceneTitle != scriptScene.title {
+                    mutatedEntries[idx].sceneTitle = scriptScene.title
+                    didMutate = true
                 }
-                return $0.fields.shotNumber < $1.fields.shotNumber
+                if mutatedEntries[idx].sceneSummary != scriptScene.summary {
+                    mutatedEntries[idx].sceneSummary = scriptScene.summary
+                    didMutate = true
+                }
+            } else if let scriptMatch = scriptScenes.first(where: {
+                normalizedSceneTitle($0.title) == normalizedSceneTitle(mutatedEntries[idx].sceneTitle)
+            }) {
+                mutatedEntries[idx].sceneID = scriptMatch.id
+                mutatedEntries[idx].sceneTitle = scriptMatch.title
+                mutatedEntries[idx].sceneSummary = scriptMatch.summary
+                didMutate = true
+            } else if let fallback = fallbackScene {
+                mutatedEntries[idx].sceneID = fallback.id
+                mutatedEntries[idx].sceneTitle = fallback.title
+                mutatedEntries[idx].sceneSummary = fallback.summary
+                didMutate = true
             }
-            let summary = sortedEntries.first?.sceneSummary ?? ""
+        }
+        if didMutate {
+            entries = mutatedEntries
+            persistEntries()
+            return
+        }
+        scenes = scriptScenes.map { scriptScene in
+            let filtered = entries.filter { $0.sceneID == scriptScene.id }
             return StoryboardSceneViewModel(
-                title: title,
-                summary: summary,
-                entries: sortedEntries
+                id: scriptScene.id,
+                title: scriptScene.title,
+                summary: scriptScene.summary,
+                body: scriptScene.body,
+                order: scriptScene.order,
+                entries: filtered
             )
         }
-        .sorted { $0.anchorShotNumber < $1.anchorShotNumber }
-
-        if let previousSelectionID,
-           scenes.contains(where: { $0.id == previousSelectionID }) {
-            selectedSceneID = previousSelectionID
-        } else if let previousSelectionTitle,
-                  let replacement = scenes.first(where: { $0.title == previousSelectionTitle }) {
-            selectedSceneID = replacement.id
-        } else {
+        if let currentSceneID = selectedSceneID,
+           scenes.contains(where: { $0.id == currentSceneID }) == false {
             selectedSceneID = scenes.first?.id
         }
-
         if let entryID = selectedEntryID,
            scenes.contains(where: { $0.entries.contains(where: { $0.id == entryID }) }) == false {
-            // fallback to the first entry under selected scene
-            selectedEntryID = currentScene?.entries.first?.id
+            selectedEntryID = scenes.first?.entries.first?.id
             focusedEntryID = selectedEntryID
         }
-
         if selectedEntryID == nil {
             selectedEntryID = scenes.first?.entries.first?.id
             focusedEntryID = selectedEntryID
         }
+    }
+
+    private func normalizedSceneTitle(_ title: String) -> String {
+        title
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+            .lowercased()
+    }
+
+    private func currentSceneDetails() -> (id: UUID, title: String, summary: String)? {
+        guard let scene = currentScene else { return nil }
+        return (scene.id, scene.title, scene.summary)
+    }
+
+    private func fallbackSceneDetails() -> (id: UUID, title: String, summary: String)? {
+        guard
+            let episode = selectedEpisode,
+            let first = episode.scenes.sorted(by: { $0.order < $1.order }).first
+        else { return nil }
+        return (first.id, first.title, first.summary)
+    }
+
+    private func targetSceneDetails() -> (id: UUID, title: String, summary: String)? {
+        currentSceneDetails() ?? fallbackSceneDetails()
     }
 
 }
@@ -490,24 +599,14 @@ protocol StoryboardAutomationHandling: AnyObject {
 }
 
 struct StoryboardSceneViewModel: Identifiable {
-    let id: String
+    let id: UUID
     let title: String
     let summary: String
+    let body: String
+    let order: Int
     let entries: [StoryboardEntry]
-
-    init(title: String, summary: String, entries: [StoryboardEntry]) {
-        self.title = title
-        self.summary = summary
-        self.entries = entries
-        let anchorID = entries.first?.id.uuidString ?? UUID().uuidString
-        self.id = "\(title)#\(anchorID)"
-    }
 
     var countDescription: String {
         "\(entries.count) 个分镜"
-    }
-
-    var anchorShotNumber: Int {
-        entries.first?.fields.shotNumber ?? Int.max
     }
 }

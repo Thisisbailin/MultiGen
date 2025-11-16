@@ -26,4 +26,8 @@ public actor MemoryAuditRepository: AuditRepositoryProtocol {
     public func clearAll() async {
         entries.removeAll()
     }
+
+    public func loadAllEntries() async -> [AuditLogEntry] {
+        entries
+    }
 }

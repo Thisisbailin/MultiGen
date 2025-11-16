@@ -11,4 +11,5 @@ public protocol AuditRepositoryProtocol: Sendable {
     func record(_ entry: AuditLogEntry) async
     func fetchRecent(limit: Int) async -> [AuditLogEntry]
     func clearAll() async
+    func loadAllEntries() async -> [AuditLogEntry]
 }
