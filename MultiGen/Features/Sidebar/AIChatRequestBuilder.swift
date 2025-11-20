@@ -12,12 +12,10 @@ struct AIChatRequestBuilder {
         prompt: String,
         context: ChatContext,
         module: PromptDocument.Module,
-        systemPrompt: String?,
-        statusText: String
+        systemPrompt: String?
     ) -> [String: String] {
         var fields: [String: String] = [
-            "prompt": prompt,
-            "contextSummary": statusText
+            "prompt": prompt
         ]
 
         if let systemPrompt, systemPrompt.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty == false {

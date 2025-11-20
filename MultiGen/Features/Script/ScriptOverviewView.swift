@@ -190,6 +190,7 @@ struct ProjectInfoPanel: View {
     let accentColor: Color
 
     @State private var isEditing = false
+    @State private var activePanel: PanelPage = .overview
     @State private var draftSynopsis: String = ""
     @State private var draftNotes: String = ""
     @State private var draftTags: [String] = []
@@ -213,38 +214,67 @@ struct ProjectInfoPanel: View {
     }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 16) {
-            HStack(alignment: .firstTextBaseline) {
-                VStack(alignment: .leading, spacing: 4) {
-                    Text(project.title)
-                        .font(.title2.bold())
-                    Text(project.type.displayName)
-                        .font(.footnote)
-                        .foregroundStyle(.secondary)
+        VStack(alignment: .leading, spacing: 12) {
+            controlStrip
+            cardContainer {
+                switch activePanel {
+                case .overview:
+                    if isEditing { overviewEditingContent } else { overviewDisplayContent }
+                case .assets:
+                    if isEditing { detailEditingContent } else { detailDisplayContent }
                 }
-                Spacer()
-                Button(isEditing ? "完成" : "编辑") {
-                    if isEditing { persistDraft() } else { syncDrafts() }
-                    withAnimation(.spring()) { isEditing.toggle() }
-                }
-            }
-
-            if isEditing {
-                editingContent
-            } else {
-                displayContent
             }
         }
-        .padding(24)
-        .background(
-            RoundedRectangle(cornerRadius: 24, style: .continuous)
-                .fill(Color(nsColor: .controlBackgroundColor))
-        )
-        .shadow(color: Color.black.opacity(0.1), radius: 20, y: 12)
-        .onChange(of: project.id) { _, _ in syncDrafts() }
+        .onChange(of: project.id) { _, _ in
+            syncDrafts()
+        }
     }
 
-    private var displayContent: some View {
+    private func cardContainer<Content: View>(@ViewBuilder content: () -> Content) -> some View {
+        content()
+            .padding(24)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background(
+                RoundedRectangle(cornerRadius: 24, style: .continuous)
+                    .fill(Color(nsColor: .controlBackgroundColor))
+            )
+            .shadow(color: Color.black.opacity(0.08), radius: 18, y: 10)
+    }
+
+    private var controlStrip: some View {
+        HStack(spacing: 12) {
+            Text(activePanel.title)
+                .font(.headline)
+            Spacer()
+            Button {
+                if isEditing { persistDraft() } else { syncDrafts() }
+                withAnimation(.spring()) { isEditing.toggle() }
+            } label: {
+                Image(systemName: isEditing ? "checkmark.circle.fill" : "pencil.circle")
+                    .font(.title3)
+                    .foregroundStyle(isEditing ? Color.accentColor : Color.secondary)
+            }
+            .buttonStyle(.borderless)
+
+            Button {
+                withAnimation(.easeInOut(duration: 0.2)) {
+                    activePanel = activePanel.next()
+                }
+            } label: {
+                Image(systemName: "arrow.right.circle.fill")
+                    .font(.title3)
+            }
+            .buttonStyle(.borderless)
+        }
+        .padding(16)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(
+            RoundedRectangle(cornerRadius: 20, style: .continuous)
+                .fill(Color(nsColor: .textBackgroundColor))
+        )
+    }
+
+    private var overviewDisplayContent: some View {
         VStack(alignment: .leading, spacing: 18) {
             VStack(alignment: .leading, spacing: 6) {
                 Text("项目简介")
@@ -272,47 +302,15 @@ struct ProjectInfoPanel: View {
             }
 
             VStack(alignment: .leading, spacing: 6) {
-                Text("备注")
+                Text("构思白板")
                     .font(.headline)
-                Text(project.notes.isEmpty ? "暂无备注" : project.notes)
+                Text(project.notes.isEmpty ? "尚未记录想法，点击编辑填写。" : project.notes)
                     .foregroundStyle(.secondary)
-            }
-
-            VStack(alignment: .leading, spacing: 10) {
-                Text("主要角色")
-                    .font(.headline)
-                if project.mainCharacters.isEmpty {
-                    Text("尚未添加角色")
-                        .foregroundStyle(.secondary)
-                } else {
-                    ScrollView(.horizontal, showsIndicators: false) {
-                        HStack(spacing: 12) {
-                            ForEach(project.mainCharacters) { character in
-                                PersonaCard(character: character)
-                            }
-                        }
-                    }
-                }
-            }
-
-            VStack(alignment: .leading, spacing: 10) {
-                Text("主要场景")
-                    .font(.headline)
-                if project.keyScenes.isEmpty {
-                    Text("尚未添加场景")
-                        .foregroundStyle(.secondary)
-                } else {
-                    VStack(spacing: 12) {
-                        ForEach(project.keyScenes) { scene in
-                            SceneCard(scene: scene)
-                        }
-                    }
-                }
             }
         }
     }
 
-    private var editingContent: some View {
+    private var overviewEditingContent: some View {
         VStack(alignment: .leading, spacing: 18) {
             VStack(alignment: .leading, spacing: 6) {
                 Text("项目简介")
@@ -364,12 +362,54 @@ struct ProjectInfoPanel: View {
             }
 
             VStack(alignment: .leading, spacing: 6) {
-                Text("备注")
+                Text("构思白板")
                     .font(.headline)
-                TextField("项目重要说明", text: $draftNotes, axis: .vertical)
-                    .textFieldStyle(.roundedBorder)
+                TextEditor(text: $draftNotes)
+                    .frame(minHeight: 100, maxHeight: 180)
+                    .padding(8)
+                    .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 12))
+            }
+        }
+    }
+
+    private var detailDisplayContent: some View {
+        VStack(alignment: .leading, spacing: 18) {
+            VStack(alignment: .leading, spacing: 10) {
+                Text("主要角色")
+                    .font(.headline)
+                if project.mainCharacters.isEmpty {
+                    Text("尚未添加角色")
+                        .foregroundStyle(.secondary)
+                } else {
+                    ScrollView(.horizontal, showsIndicators: false) {
+                        HStack(spacing: 12) {
+                            ForEach(project.mainCharacters) { character in
+                                PersonaCard(character: character)
+                            }
+                        }
+                    }
+                }
             }
 
+            VStack(alignment: .leading, spacing: 10) {
+                Text("主要场景")
+                    .font(.headline)
+                if project.keyScenes.isEmpty {
+                    Text("尚未添加场景")
+                        .foregroundStyle(.secondary)
+                } else {
+                    VStack(spacing: 12) {
+                        ForEach(project.keyScenes) { scene in
+                            SceneCard(scene: scene)
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    private var detailEditingContent: some View {
+        VStack(alignment: .leading, spacing: 18) {
             VStack(alignment: .leading, spacing: 10) {
                 HStack {
                     Text("角色")
@@ -467,6 +507,27 @@ struct ProjectInfoPanel: View {
         draftEndDate = project.productionEndDate
         draftCharacters = project.mainCharacters
         draftScenes = project.keyScenes
+    }
+}
+
+extension ProjectInfoPanel {
+    enum PanelPage: CaseIterable {
+        case overview
+        case assets
+
+        var title: String {
+            switch self {
+            case .overview: return "项目概览"
+            case .assets: return "角色与场景"
+            }
+        }
+
+        func next() -> PanelPage {
+            let all = Self.allCases
+            guard let idx = all.firstIndex(of: self) else { return .overview }
+            let nextIndex = all.index(after: idx)
+            return nextIndex < all.endIndex ? all[nextIndex] : all.first!
+        }
     }
 }
 

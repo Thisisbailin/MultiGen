@@ -69,15 +69,36 @@ struct ScriptView: View {
         contentView
         .animation(.easeInOut(duration: 0.2), value: selectedProjectID)
         .onAppear {
+            if selectedProjectID == nil {
+                if let savedProject = navigationStore.currentScriptProjectID,
+                   projects.contains(where: { $0.id == savedProject }) {
+                    selectedProjectID = savedProject
+                } else {
+                    selectedProjectID = projects.first?.id
+                }
+            }
+            if selectedEpisodeID == nil {
+                if
+                    let savedEpisode = navigationStore.currentScriptEpisodeID,
+                    let project = selectedProject,
+                    project.episodes.contains(where: { $0.id == savedEpisode })
+                {
+                    selectedEpisodeID = savedEpisode
+                } else {
+                    selectedEpisodeID = selectedProject?.orderedEpisodes.first?.id
+                }
+            }
+            navigationStore.currentScriptProjectID = selectedProjectID
             navigationStore.currentScriptEpisodeID = selectedEpisodeID
             if highlightedProjectID == nil {
-                highlightedProjectID = projects.first?.id
+                highlightedProjectID = selectedProjectID ?? projects.first?.id
             }
         }
         .onChange(of: selectedEpisodeID) { _, newValue in
             navigationStore.currentScriptEpisodeID = newValue
         }
         .onChange(of: selectedProjectID) { _, newValue in
+            navigationStore.currentScriptProjectID = newValue
             if newValue == nil {
                 navigationStore.currentScriptEpisodeID = nil
             }

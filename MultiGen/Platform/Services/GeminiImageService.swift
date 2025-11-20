@@ -90,6 +90,9 @@ public final class GeminiImageService: GeminiImageServiceProtocol {
             logger.error("Failed to decode image payload: \(debugText, privacy: .public)")
             throw GeminiServiceError.decodingFailed
         }
+        if let raw = String(data: data, encoding: .utf8) {
+            print("[GeminiImageService] Raw response: \(raw)")
+        }
 
         logger.log("Image payload received (base64 size: \(imageData.count, privacy: .public))")
 

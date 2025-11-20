@@ -28,7 +28,7 @@ public enum GeminiModel: String, CaseIterable, Identifiable, Codable, Sendable {
         }
     }
 
-    public static var textOptions: [GeminiModel] { [.flash20, .flash25, .flash25Pro] }
+    public static var textOptions: [GeminiModel] { [.flash20, .flash25, .flash25Pro, .flash25ImagePreview] }
     public static var imageOptions: [GeminiModel] { [.flash25ImagePreview] }
 
     public static var defaultTextModel: GeminiModel { .flash25 }

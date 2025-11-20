@@ -34,11 +34,13 @@ public final class GeminiTextService: GeminiTextServiceProtocol {
             throw GeminiServiceError.invalidRequest
         }
 
+        let combinedPrompt = makeCombinedPrompt(for: request)
+
         let payload = GeminiGenerateContentRequest(
             contents: [
                 .init(
                     role: "user",
-                    parts: [.init(text: "你是一名专业的视觉创作助手，请依据结构化字段生成清晰的场景描述。\n\(promptBody(for: request))")]
+                    parts: [.init(text: combinedPrompt)]
                 )
             ],
             generationConfig: .init(temperature: 0.85, topP: 0.95, topK: 32)
@@ -84,6 +86,9 @@ public final class GeminiTextService: GeminiTextServiceProtocol {
             logger.error("Failed to decode text payload: \(debugText, privacy: .public)")
             throw GeminiServiceError.decodingFailed
         }
+        if let raw = String(data: data, encoding: .utf8) {
+            print("[GeminiTextService] Raw response: \(raw)")
+        }
 
         logger.log("Text response snippet: \(text.prefix(100), privacy: .public)")
 
@@ -96,20 +101,30 @@ public final class GeminiTextService: GeminiTextServiceProtocol {
         return SceneJobResult(imageURL: nil, imageBase64: nil, metadata: metadata)
     }
 
-    private func promptBody(for request: SceneJobRequest) -> String {
-        let sortedFields = request.fields
+    private func makeCombinedPrompt(for request: SceneJobRequest) -> String {
+        let systemPrompt = request.fields["systemPrompt"]?.trimmingCharacters(in: .whitespacesAndNewlines)
+        let filteredFields = request.fields.filter { $0.key != "systemPrompt" }
+        let body = promptBody(action: request.action, fields: filteredFields, assetRefs: request.assetReferences)
+        if let systemPrompt, systemPrompt.isEmpty == false {
+            return "\(systemPrompt)\n\(body)"
+        }
+        return body
+    }
+
+    private func promptBody(action: SceneAction, fields: [String: String], assetRefs: [String]) -> String {
+        let sortedFields = fields
             .sorted { $0.key < $1.key }
             .map { "\($0.key)：\($0.value)" }
             .joined(separator: "\n")
 
-        let assetRefs = request.assetReferences.isEmpty
+        let assetRefsText = assetRefs.isEmpty
             ? ""
-            : "\n参考素材：\(request.assetReferences.joined(separator: ", "))"
+            : "\n参考素材：\(assetRefs.joined(separator: ", "))"
 
         return """
-        操作：\(request.action.displayName)
+        操作：\(action.displayName)
         字段：
-        \(sortedFields)\(assetRefs)
+        \(sortedFields)\(assetRefsText)
         """
     }
 }

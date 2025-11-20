@@ -32,7 +32,6 @@ final class ImagingStore: ObservableObject {
     }
 
     @Published var selectedSegment: Segment = .style
-    @Published var promptInput: String = ""
     @Published private(set) var isGenerating = false
     @Published private(set) var statusMessage: String?
     @Published private(set) var errorMessage: String?
@@ -43,19 +42,21 @@ final class ImagingStore: ObservableObject {
         errorMessage = nil
     }
 
-    func clearOutput(resetPrompt: Bool = false) {
+    func clearOutput() {
         generatedImage = nil
-        if resetPrompt {
-            promptInput = ""
-        }
         resetNotifications()
     }
 
     func generateImage(
+        prompt: String,
+        attachments: [ImagingAttachmentPayload],
+        actionCenter: AIActionCenter,
         dependencies: AppDependencies,
-        navigationStore: NavigationStore
+        navigationStore: NavigationStore,
+        summary: String
     ) async {
-        guard promptInput.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty == false else {
+        let trimmed = prompt.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard trimmed.isEmpty == false else {
             errorMessage = "请输入提示词"
             statusMessage = nil
             return
@@ -63,43 +64,88 @@ final class ImagingStore: ObservableObject {
         guard isGenerating == false else { return }
         isGenerating = true
         errorMessage = nil
-        let routeLabel = dependencies.currentImageRoute().displayName
-        statusMessage = "正在使用 \(dependencies.configuration.imageModel.displayName) · \(routeLabel)"
+        statusMessage = "正在使用 \(dependencies.currentTextRoute().displayName) · \(dependencies.currentTextModelLabel())"
 
-        let request = SceneJobRequest(
+        let request = AIActionRequest(
+            kind: .imaging,
             action: .generateScene,
-            fields: ["prompt": promptInput],
-            channel: .image
+            channel: .text,
+            fields: makeFields(prompt: trimmed, attachments: attachments),
+            assetReferences: attachments.map { $0.fileName },
+            module: .aiConsole,
+            context: nil,
+            contextSummaryOverride: summary,
+            origin: "影像实验室"
         )
 
+        var accumulated = ""
         do {
-            let result = try await dependencies.imageService().generateImage(for: request)
-            if let base64 = result.imageBase64,
-               let data = Data(base64Encoded: base64),
-               let image = NSImage(data: data) {
-                generatedImage = image
-            } else {
-                generatedImage = nil
+            let stream = actionCenter.stream(request)
+            for try await event in stream {
+                switch event {
+                case .partial(let delta):
+                    accumulated += delta
+                    statusMessage = "正在生成…（\(accumulated.count) 字）"
+                case .completed(let result):
+                    let text = result.text ?? accumulated
+                    if let image = try await resolveImage(from: result, fallbackText: text) {
+                        generatedImage = image
+                        statusMessage = "生成完成 · \(result.metadata.model) · \(result.route.displayName)"
+                        navigationStore.pendingAIChatSystemMessage = "影像模块完成一次图像生成（\(result.metadata.model)）。"
+                    } else {
+                        generatedImage = nil
+                        errorMessage = "AI 回复未包含可用的图像链接。"
+                        statusMessage = nil
+                    }
+                }
             }
-
-            let auditEntry = AuditLogEntry(
-                jobID: request.id,
-                action: request.action,
-                promptHash: String(promptInput.hashValue, radix: 16),
-                assetRefs: [],
-                modelVersion: result.metadata.model,
-                metadata: [
-                    "source": "Imaging-Style-MVP",
-                    "segment": selectedSegment.rawValue
-                ]
-            )
-            await dependencies.auditRepository.record(auditEntry)
-            statusMessage = "生成完成 · \(routeLabel)"
-            navigationStore.pendingAIChatSystemMessage = "影像模块完成一次图像生成（\(result.metadata.model)）。"
         } catch {
+            generatedImage = nil
             errorMessage = error.localizedDescription
             statusMessage = nil
         }
         isGenerating = false
     }
+
+    private func resolveImage(from result: AIActionResult, fallbackText: String) async throws -> NSImage? {
+        if let image = result.image {
+            return image
+        }
+        if let url = extractImageURL(from: fallbackText) {
+            let (data, _) = try await URLSession.shared.data(from: url)
+            return NSImage(data: data)
+        }
+        return nil
+    }
+
+    private func extractImageURL(from text: String) -> URL? {
+        let pattern = #"!\[[^\]]*\]\((.*?)\)"#
+        guard let regex = try? NSRegularExpression(pattern: pattern) else { return nil }
+        let range = NSRange(text.startIndex..<text.endIndex, in: text)
+        guard let match = regex.firstMatch(in: text, range: range),
+              let urlRange = Range(match.range(at: 1), in: text) else {
+            return nil
+        }
+        return URL(string: String(text[urlRange]))
+    }
+
+    private func makeFields(prompt: String, attachments: [ImagingAttachmentPayload]) -> [String: String] {
+        var fields: [String: String] = [
+            "prompt": prompt
+        ]
+        if attachments.isEmpty == false {
+            fields["imageAttachmentCount"] = "\(attachments.count)"
+            for (index, attachment) in attachments.enumerated() {
+                let key = "imageAttachment\(index + 1)"
+                fields["\(key)FileName"] = attachment.fileName
+                fields["\(key)Base64"] = attachment.base64Data
+            }
+        }
+        return fields
+    }
+}
+
+struct ImagingAttachmentPayload: Codable, Sendable {
+    let fileName: String
+    let base64Data: String
 }

@@ -11,6 +11,7 @@ import Foundation
 struct StoryboardResponseParser {
     struct ParsedStoryboardEntry {
         var fields: StoryboardEntryFields
+        var sceneID: UUID?
         var sceneTitle: String?
         var sceneSummary: String?
     }
@@ -67,6 +68,7 @@ struct StoryboardResponseParser {
     }
 
     struct ScenePayload: Decodable {
+        var sceneId: UUID?
         var sceneTitle: String?
         var scene: String?
         var title: String?
@@ -83,6 +85,7 @@ struct StoryboardResponseParser {
         var resolvedSummary: String? {
             sceneSummary ?? summary ?? overview
         }
+        var resolvedSceneID: UUID? { sceneId }
 
         var resolvedEntries: [EntryPayload] {
             shots ?? entries ?? []
@@ -94,7 +97,7 @@ struct StoryboardResponseParser {
     }
 
     static let responseFormatHint = """
-    请以 JSON 输出，形如 {"entries":[{"shotNumber":1,"shotScale":"中景","cameraMovement":"推镜","duration":"4s","dialogue":"……","aiPrompt":"……"}]}，字段必须完整且使用双引号。
+    请以 JSON 输出，推荐结构：{"scenes":[{"sceneId":"<提供的 sceneId>","sceneTitle":"场景标题","sceneSummary":"摘要","shots":[{"shotNumber":1,"shotScale":"中景","cameraMovement":"推镜","duration":"4s","dialogueOrOS":"……","aiPrompt":"……","visualSummary":"……","soundDesign":"……"}]}]}。如仅生成单个场景，也可直接输出 {"entries":[...]}。
     """
 
     func parseEntries(from text: String, nextShotNumber: Int) -> [ParsedStoryboardEntry] {
@@ -109,9 +112,9 @@ struct StoryboardResponseParser {
         if let sceneEnvelope = try? decoder.decode(SceneEnvelope.self, from: data) {
             return flattenScenes(sceneEnvelope.scenes, startingShot: nextShotNumber)
         } else if let envelope = try? decoder.decode(ResponseEnvelope.self, from: data) {
-            return flatten(entries: envelope.entries, sceneTitle: nil, sceneSummary: nil, startingShot: nextShotNumber)
+            return flatten(entries: envelope.entries, sceneID: nil, sceneTitle: nil, sceneSummary: nil, startingShot: nextShotNumber)
         } else if let arrayPayload = try? decoder.decode([EntryPayload].self, from: data) {
-            return flatten(entries: arrayPayload, sceneTitle: nil, sceneSummary: nil, startingShot: nextShotNumber)
+            return flatten(entries: arrayPayload, sceneID: nil, sceneTitle: nil, sceneSummary: nil, startingShot: nextShotNumber)
         } else {
             return []
         }
@@ -123,6 +126,7 @@ struct StoryboardResponseParser {
         for scene in scenes {
             let sceneEntries = flatten(
                 entries: scene.resolvedEntries,
+                sceneID: scene.resolvedSceneID,
                 sceneTitle: scene.resolvedTitle,
                 sceneSummary: scene.resolvedSummary,
                 startingShot: currentShot
@@ -137,6 +141,7 @@ struct StoryboardResponseParser {
 
     private func flatten(
         entries: [EntryPayload],
+        sceneID: UUID?,
         sceneTitle: String?,
         sceneSummary: String?,
         startingShot: Int
@@ -154,6 +159,7 @@ struct StoryboardResponseParser {
             resolved.append(
                 ParsedStoryboardEntry(
                     fields: fields,
+                    sceneID: sceneID,
                     sceneTitle: sceneTitle,
                     sceneSummary: sceneSummary
                 )

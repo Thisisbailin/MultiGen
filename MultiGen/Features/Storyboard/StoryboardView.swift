@@ -10,11 +10,8 @@ import SwiftUI
 struct StoryboardView: View {
     @EnvironmentObject private var navigationStore: NavigationStore
     @EnvironmentObject private var dependencies: AppDependencies
-    @EnvironmentObject private var actionCenter: AIActionCenter
-    @EnvironmentObject private var promptLibraryStore: PromptLibraryStore
     @StateObject private var store: StoryboardDialogueStore
     @State private var exportErrorMessage: String?
-    @State private var isGeneratingStoryboard = false
 
     init(store: StoryboardDialogueStore) {
         _store = StateObject(wrappedValue: store)
@@ -52,10 +49,20 @@ struct StoryboardView: View {
             Text(exportErrorMessage ?? "")
         }
         .onAppear {
-            navigationStore.currentStoryboardEpisodeID = store.selectedEpisodeID
+            if let savedProject = navigationStore.currentStoryboardProjectID {
+                store.selectProject(id: savedProject)
+            }
+            if let savedEpisode = navigationStore.currentStoryboardEpisodeID {
+                store.selectEpisode(id: savedEpisode)
+            }
+            navigationStore.currentStoryboardProjectID = store.selectedProjectID
+            navigationStore.currentStoryboardEpisodeID = store.selectedEpisode?.id
             navigationStore.currentStoryboardSceneID = store.selectedSceneID
             syncSceneSnapshot()
             navigationStore.storyboardAutomationHandler = store
+        }
+        .onReceive(store.$selectedProjectID) { projectID in
+            navigationStore.currentStoryboardProjectID = projectID
         }
         .onReceive(store.$selectedEpisode) { episode in
             navigationStore.currentStoryboardEpisodeID = episode?.id
@@ -68,11 +75,6 @@ struct StoryboardView: View {
             syncSceneSnapshot()
         }
         .onDisappear {
-            if navigationStore.selection != .storyboard {
-                navigationStore.currentStoryboardEpisodeID = nil
-                navigationStore.currentStoryboardSceneID = nil
-                navigationStore.currentStoryboardSceneSnapshot = nil
-            }
             if navigationStore.storyboardAutomationHandler === store {
                 navigationStore.storyboardAutomationHandler = nil
             }
@@ -117,14 +119,6 @@ struct StoryboardView: View {
                         Spacer()
                         HStack(spacing: 8) {
                             Button {
-                                Task { await generateStoryboardForCurrentScene() }
-                            } label: {
-                                Label("生成分镜", systemImage: "wand.and.stars")
-                            }
-                            .buttonStyle(.borderedProminent)
-                            .disabled(store.selectedEpisode == nil || isGeneratingStoryboard)
-
-                            Button {
                                 selectNextScene()
                             } label: {
                                 Label("下一个场景", systemImage: "arrow.forward.circle")
@@ -162,82 +156,6 @@ struct StoryboardView: View {
         }
     }
 
-    @MainActor
-    private func generateStoryboardForCurrentScene() async {
-        guard isGeneratingStoryboard == false else { return }
-        guard let project = store.selectedProject else {
-            store.errorMessage = "请先选择项目"
-            return
-        }
-        guard let episode = store.selectedEpisode else {
-            store.errorMessage = "请先选择剧集"
-            return
-        }
-        guard let scene = store.currentScene else {
-            store.errorMessage = "当前没有可生成的场景"
-            return
-        }
-
-        let snapshot = navigationStore.currentStoryboardSceneSnapshot ?? StoryboardSceneContextSnapshot(
-            id: scene.id,
-            title: scene.title,
-            order: scene.order,
-            summary: scene.summary,
-            body: scene.body
-        )
-
-        let context = ChatContext.storyboard(
-            project: project,
-            episode: episode,
-            scene: nil,
-            snapshot: snapshot,
-            workspace: store.workspace
-        )
-
-        var fields = AIChatRequestBuilder.contextFields(for: context)
-        fields["prompt"] = "根据上述剧本与场景信息生成电影化的镜头表，输出 JSON 以便注入分镜面板。"
-        fields["contextSummary"] = "分镜 · \(episode.displayLabel) · \(scene.title)"
-        let systemPrompt = promptLibraryStore.document(for: .storyboard).content.trimmingCharacters(in: .whitespacesAndNewlines)
-        if systemPrompt.isEmpty == false {
-            fields["systemPrompt"] = systemPrompt
-        }
-        fields["responseFormat"] = StoryboardResponseParser.responseFormatHint
-
-        let request = AIActionRequest(
-            kind: .storyboardOperation,
-            action: .generateScene,
-            channel: .text,
-            fields: fields,
-            assetReferences: [],
-            module: .storyboard,
-            context: context,
-            contextSummaryOverride: "分镜 · \(episode.displayLabel) · \(scene.title)",
-            origin: "分镜助手"
-        )
-
-        isGeneratingStoryboard = true
-        store.publishInfoBanner("正在生成《\(scene.title)》的分镜…")
-
-        do {
-            var collected = ""
-            let stream = actionCenter.stream(request)
-            for try await event in stream {
-                switch event {
-                case .partial(let delta):
-                    collected += delta
-                case .completed:
-                    break
-                }
-            }
-            store.publishInfoBanner("《\(scene.title)》分镜已更新。")
-        } catch {
-            store.errorMessage = error.localizedDescription
-            store.publishInfoBanner("生成失败：\(error.localizedDescription)")
-        }
-
-        isGeneratingStoryboard = false
-    }
-
     private func toolbarContent() -> some ToolbarContent {
         ToolbarItemGroup {
             Picker("项目", selection: projectSelectionBinding) {
@@ -259,16 +177,6 @@ struct StoryboardView: View {
             }
             .labelsHidden()
             .frame(width: 180)
-
-            if store.scenes.isEmpty == false {
-                Picker("场景", selection: sceneSelectionBinding) {
-                    ForEach(store.scenes) { scene in
-                        Text(scene.title).tag(Optional(scene.id))
-                    }
-                }
-                .labelsHidden()
-                .frame(width: 150)
-            }
 
             Menu {
                 ForEach(StoryboardExportFormat.allCases) { format in
@@ -430,6 +338,7 @@ private struct ShotReviewCard: View {
                 .foregroundStyle(.secondary)
             Text(value.isEmpty ? "（暂无内容）" : value)
                 .font(.body)
+                .textSelection(.enabled)
         }
     }
 }

@@ -17,12 +17,12 @@ final class RelayImageService: GeminiImageServiceProtocol {
     }
 
     func generateImage(for request: SceneJobRequest) async throws -> SceneJobResult {
-        let snapshot = await MainActor.run { configuration.relaySettingsSnapshot() }
+        let snapshot = await MainActor.run { configuration.relayImageSettingsSnapshot() }
         guard let snapshot else {
             throw GeminiServiceError.relayConfigurationMissing
         }
 
-        let endpoint = RelaySettingsSnapshot.normalize(baseURL: snapshot.baseURL) + "/v1/images/generations"
+        let endpoint = snapshot.endpoint(for: "/images/generations")
         guard let url = URL(string: endpoint) else {
             throw GeminiServiceError.invalidRequest
         }
@@ -34,18 +34,17 @@ final class RelayImageService: GeminiImageServiceProtocol {
         urlRequest.setValue("Bearer \(snapshot.apiKey)", forHTTPHeaderField: "Authorization")
         urlRequest.httpBody = try JSONEncoder().encode(payload)
 
-        let (data, response): (Data, URLResponse)
-        do {
-            (data, response) = try await session.data(for: urlRequest)
-        } catch {
-            throw GeminiServiceError.transportFailure(underlying: error)
+        let (data, response) = try await session.data(for: urlRequest)
+        guard let httpResponse = response as? HTTPURLResponse else {
+            throw GeminiServiceError.transportFailure(underlying: URLError(.badServerResponse))
         }
-
-        guard let httpResponse = response as? HTTPURLResponse, (200..<300).contains(httpResponse.statusCode) else {
+        guard (200..<300).contains(httpResponse.statusCode) else {
+            let bodyString = String(data: data, encoding: .utf8) ?? "<binary>"
+            print("[RelayImageService] HTTP \(httpResponse.statusCode) error body: \(bodyString)")
             if let relayError = try? JSONDecoder().decode(RelayAPIError.self, from: data) {
                 throw GeminiServiceError.serverRejected(reason: relayError.error.message)
             }
-            throw GeminiServiceError.serverRejected(reason: "HTTP \((response as? HTTPURLResponse)?.statusCode ?? -1)")
+            throw GeminiServiceError.serverRejected(reason: "HTTP \(httpResponse.statusCode)")
         }
 
         let decoder = JSONDecoder()
@@ -61,7 +60,7 @@ final class RelayImageService: GeminiImageServiceProtocol {
             duration: 0
         )
 
-        if let base64 = first.b64JSON {
+        if let base64 = first.b64JSON ?? first.b64Json {
             return SceneJobResult(imageURL: nil, imageBase64: base64, metadata: metadata)
         } else if let urlString = first.url, let remoteURL = URL(string: urlString) {
             return SceneJobResult(imageURL: remoteURL, imageBase64: nil, metadata: metadata)
@@ -78,6 +77,7 @@ final class RelayImageService: GeminiImageServiceProtocol {
 
         return "\(request.action.displayName)：\(sortedFields)"
     }
+
 }
 
 private struct RelayImageRequest: Encodable {
@@ -89,6 +89,7 @@ private struct RelayImageResponse: Decodable {
     struct DataPayload: Decodable {
         let url: String?
         let b64JSON: String?
+        let b64Json: String?
     }
 
     let data: [DataPayload]

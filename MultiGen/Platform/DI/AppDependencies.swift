@@ -37,21 +37,39 @@ final class AppDependencies: ObservableObject {
     }
 
     func textService() -> GeminiTextServiceProtocol {
-        if configuration.relaySettingsSnapshot() != nil { return relayTextService }
+        if configuration.relayTextSettingsSnapshot() != nil { return relayTextService }
         return primaryTextService
     }
 
     func imageService() -> GeminiImageServiceProtocol {
-        if configuration.relaySettingsSnapshot() != nil { return relayImageService }
+        if configuration.relayImageSettingsSnapshot() != nil { return relayImageService }
         return primaryImageService
     }
 
     func currentTextRoute() -> GeminiRoute {
-        configuration.relaySettingsSnapshot() != nil ? .relay : .official
+        configuration.relayTextSettingsSnapshot() != nil ? .relay : .official
     }
 
     func currentImageRoute() -> GeminiRoute {
-        configuration.relaySettingsSnapshot() != nil ? .relay : .official
+        configuration.relayImageSettingsSnapshot() != nil ? .relay : .official
+    }
+
+    func currentTextModelLabel() -> String {
+        switch currentTextRoute() {
+        case .relay:
+            return configuration.relayTextSettingsSnapshot()?.model ?? "未配置中转模型"
+        case .official:
+            return configuration.textModel.displayName
+        }
+    }
+
+    func currentImageModelLabel() -> String {
+        switch currentImageRoute() {
+        case .relay:
+            return configuration.relayImageSettingsSnapshot()?.model ?? "未配置中转模型"
+        case .official:
+            return configuration.imageModel.displayName
+        }
     }
 }
 

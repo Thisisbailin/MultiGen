@@ -1,31 +1,19 @@
 import SwiftUI
+import AppKit
 
 struct ImagingView: View {
-    @EnvironmentObject private var dependencies: AppDependencies
-    @EnvironmentObject private var navigationStore: NavigationStore
-    @StateObject private var store = ImagingStore()
+    @EnvironmentObject private var store: ImagingStore
 
     var body: some View {
-        VStack(spacing: 16) {
-            header
-            Picker("模块", selection: $store.selectedSegment) {
-                ForEach(ImagingStore.Segment.allCases) { segment in
-                    Text(segment.title).tag(segment)
-                }
+        ScrollView {
+            VStack(spacing: 24) {
+                header
+                instructions
+                resultPanel
             }
-            .pickerStyle(.segmented)
-            .padding(.horizontal, 20)
-
-            Divider()
-
-            switch store.selectedSegment {
-            case .style:
-                stylePanel
-            default:
-                placeholderPanel(title: store.selectedSegment.title)
-            }
+            .padding(24)
+            .frame(maxWidth: .infinity, alignment: .leading)
         }
-        .padding(.top, 12)
         .background(Color(nsColor: .windowBackgroundColor))
     }
 
@@ -33,47 +21,30 @@ struct ImagingView: View {
         VStack(alignment: .leading, spacing: 6) {
             Text("影像模块 · macOS")
                 .font(.system(.title, weight: .semibold))
-            Text("当前提供风格探索的测试版文生图功能。其它子模块作为占位，稍后逐步实现。")
+            Text("影像模块现在通过智能协同面板触发生成，页面仅作为结果画廊与状态面板。")
                 .foregroundStyle(.secondary)
         }
         .frame(maxWidth: .infinity, alignment: .leading)
-        .padding(.horizontal, 20)
     }
 
-    private var stylePanel: some View {
-        VStack(spacing: 12) {
-            VStack(alignment: .leading, spacing: 8) {
-                Text("风格设定 · 文生图 MVP")
-                    .font(.headline)
-                Text("输入想要探索的风格关键字，系统会调用 Gemini 图像模型生成一张图像并写入审计日志，智能协同会收到操作通知。")
-                    .font(.subheadline)
-                    .foregroundStyle(.secondary)
-            }
-            TextField("如：赛博朋克市场·霓虹灯·烟雨夜", text: $store.promptInput, axis: .vertical)
-                .textFieldStyle(.roundedBorder)
-                .lineLimit(3, reservesSpace: true)
+    private var instructions: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Label("如何使用", systemImage: "sparkles")
+                .font(.headline)
+            Text("在左侧的智能协同面板切换到影像模块，输入提示并可以附加参考图片。生成完成后，结果会自动展示在下方。")
+                .foregroundStyle(.secondary)
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+    }
 
-            HStack {
-                Button {
-                    Task {
-                        await store.generateImage(dependencies: dependencies, navigationStore: navigationStore)
-                    }
-                } label: {
-                    if store.isGenerating {
-                        ProgressView()
-                    } else {
-                        Label("生成图像", systemImage: "sparkles")
-                    }
-                }
-                .buttonStyle(.borderedProminent)
-                .disabled(store.isGenerating || store.promptInput.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
-
-                Button("清除状态") {
-                    store.clearOutput(resetPrompt: true)
-                }
-                .buttonStyle(.bordered)
-
-                Spacer()
+    private var resultPanel: some View {
+        VStack(alignment: .leading, spacing: 16) {
+            if let error = store.errorMessage {
+                statusBanner(text: error, systemImage: "exclamationmark.triangle.fill", tint: .orange)
+            } else if let status = store.statusMessage {
+                statusBanner(text: status, systemImage: "checkmark.seal.fill", tint: .green)
+            } else {
+                statusBanner(text: "等待指令…", systemImage: "hourglass", tint: .secondary)
             }
 
             if let image = store.generatedImage {
@@ -81,23 +52,17 @@ struct ImagingView: View {
                     Image(nsImage: image)
                         .resizable()
                         .scaledToFit()
-                        .frame(maxWidth: 420)
                         .cornerRadius(12)
                         .shadow(radius: 10)
+                        .padding(.vertical, 8)
                 }
-                .frame(maxHeight: 420)
+                .frame(maxHeight: 440)
             } else {
-                placeholderPanel(title: "等待生成", subtitle: "生成的图像会显示在这里，并且通知智能协同侧边栏。")
-                    .frame(maxHeight: 300)
-            }
-
-            if let error = store.errorMessage {
-                statusBanner(text: error, systemImage: "exclamationmark.triangle.fill", tint: .orange)
-            } else if let status = store.statusMessage {
-                statusBanner(text: status, systemImage: "checkmark.seal.fill", tint: .green)
+                placeholderPanel(title: "等待生成", subtitle: "当你在智能协同内触发生图时，结果会展示在这里。")
+                    .frame(maxHeight: 320)
             }
         }
-        .padding(20)
+        .frame(maxWidth: .infinity, alignment: .leading)
     }
 
     private func placeholderPanel(title: String, subtitle: String? = nil) -> some View {
@@ -133,4 +98,5 @@ struct ImagingView: View {
                 .fill(tint.opacity(0.12))
         )
     }
+
 }

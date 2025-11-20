@@ -19,4 +19,13 @@ struct RelaySettingsSnapshot {
         }
         return trimmed
     }
+
+    func endpoint(for path: String) -> String {
+        let normalized = RelaySettingsSnapshot.normalize(baseURL: baseURL)
+        if normalized.hasSuffix("/v1") {
+            return normalized + path
+        } else {
+            return normalized + "/v1" + path
+        }
+    }
 }

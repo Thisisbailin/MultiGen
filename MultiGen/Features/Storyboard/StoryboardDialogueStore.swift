@@ -34,16 +34,31 @@ final class StoryboardDialogueStore: ObservableObject {
 
     init(
         scriptStore: ScriptStore,
-        storyboardStore: StoryboardStore
+        storyboardStore: StoryboardStore,
+        defaultProjectID: UUID? = nil,
+        defaultEpisodeID: UUID? = nil
     ) {
         self.scriptStore = scriptStore
         self.storyboardStore = storyboardStore
 
         projects = scriptStore.projects
-        selectedProjectID = projects.first?.id
-        episodes = projects.first?.orderedEpisodes ?? []
+        if let defaultProjectID,
+           projects.contains(where: { $0.id == defaultProjectID }) {
+            selectedProjectID = defaultProjectID
+        } else {
+            selectedProjectID = projects.first?.id
+        }
+        if let projectID = selectedProjectID,
+           let project = projects.first(where: { $0.id == projectID }) {
+            episodes = project.orderedEpisodes
+        } else {
+            episodes = projects.first?.orderedEpisodes ?? []
+        }
         observeStores()
-        if let firstEpisode = episodes.first {
+        if let defaultEpisodeID,
+           episodes.contains(where: { $0.id == defaultEpisodeID }) {
+            selectEpisode(id: defaultEpisodeID)
+        } else if let firstEpisode = episodes.first {
             selectEpisode(id: firstEpisode.id)
         } else {
             selectEpisode(id: nil)
@@ -339,23 +354,25 @@ final class StoryboardDialogueStore: ObservableObject {
         episode: ScriptEpisode,
         sourceTurnID: UUID
     ) -> [UUID] {
-        guard let sceneDetails = targetSceneDetails() else {
-            parserWarning = "未找到可用场景。请在剧本模块新增场景后再试。"
-            return []
-        }
-
-        let currentEntries = entries
-        let nextShot = (currentEntries.map(\.fields.shotNumber).max() ?? 0) + 1
-        let parsed = parser.parseEntries(from: assistantText, nextShotNumber: nextShot)
-
+        let parsed = parser.parseEntries(from: assistantText, nextShotNumber: 1)
         guard parsed.isEmpty == false else { return [] }
 
-        var updatedEntries = currentEntries
+        var updatedEntries = entries
         var touchedIDs: [UUID] = []
+        var nextShotCache: [UUID: Int] = [:]
 
         for parsedEntry in parsed {
-            let fields = parsedEntry.fields
-            if let index = updatedEntries.firstIndex(where: { $0.fields.shotNumber == fields.shotNumber }) {
+            guard let sceneDetails = sceneDetails(for: parsedEntry, episode: episode) ?? targetSceneDetails() else {
+                parserWarning = "未找到可用场景。请在剧本模块新增场景后再试。"
+                continue
+            }
+
+            var fields = parsedEntry.fields
+            if fields.shotNumber <= 0 {
+                fields.shotNumber = nextShotNumber(for: sceneDetails.id, cache: &nextShotCache)
+            }
+
+            if let index = updatedEntries.firstIndex(where: { $0.sceneID == sceneDetails.id && $0.fields.shotNumber == fields.shotNumber }) {
                 var entry = updatedEntries[index]
                 entry.version += 1
                 entry.fields = fields
@@ -409,6 +426,33 @@ final class StoryboardDialogueStore: ObservableObject {
         refreshWorkspaceSnapshot()
         return touchedIDs
     }
+
+    private func sceneDetails(for parsed: StoryboardResponseParser.ParsedStoryboardEntry, episode: ScriptEpisode) -> (id: UUID, title: String, summary: String)? {
+        if let id = parsed.sceneID,
+           let scene = episode.scenes.first(where: { $0.id == id }) {
+            return (scene.id, scene.title, scene.summary)
+        }
+        if let title = parsed.sceneTitle,
+           let scene = episode.scenes.first(where: { normalizedSceneTitle($0.title) == normalizedSceneTitle(title) }) {
+            return (scene.id, scene.title, scene.summary)
+        }
+        return nil
+    }
+
+    private func nextShotNumber(for sceneID: UUID, cache: inout [UUID: Int]) -> Int {
+        if let cached = cache[sceneID] {
+            cache[sceneID] = cached + 1
+            return cached
+        }
+        let existingMax = entries
+            .filter { $0.sceneID == sceneID }
+            .map { $0.fields.shotNumber }
+            .max() ?? 0
+        let next = existingMax + 1
+        cache[sceneID] = next + 1
+        return next
+    }
+
 
     private func updateEntry(
         _ entryID: UUID,

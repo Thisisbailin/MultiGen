@@ -81,11 +81,9 @@ struct AIChatRequestBuilderTests {
             prompt: "帮我生成分镜",
             context: context,
             module: .storyboard,
-            systemPrompt: "系统提示词",
-            statusText: "上下文：分镜"
+            systemPrompt: "系统提示词"
         )
         #expect(fields["systemPrompt"] == "系统提示词")
-        #expect(fields["contextSummary"] == "上下文：分镜")
         #expect(fields["responseFormat"] == StoryboardResponseParser.responseFormatHint)
         #expect(fields["sceneContext"]?.contains("地下实验室") == true)
         #expect(fields["scriptContext"]?.contains("剧集：") == true)

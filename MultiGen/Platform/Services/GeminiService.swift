@@ -33,8 +33,37 @@ public enum GeminiServiceError: Error, LocalizedError {
     }
 }
 
+public struct GeminiTextStreamChunk: Sendable {
+    public let textDelta: String
+    public let modelIdentifier: String?
+    public let isTerminal: Bool
+}
+
 public protocol GeminiTextServiceProtocol: Sendable {
     func submit(job request: SceneJobRequest) async throws -> SceneJobResult
+    func stream(job request: SceneJobRequest) -> AsyncThrowingStream<GeminiTextStreamChunk, Error>
+}
+
+public extension GeminiTextServiceProtocol {
+    func stream(job request: SceneJobRequest) -> AsyncThrowingStream<GeminiTextStreamChunk, Error> {
+        AsyncThrowingStream { continuation in
+            Task {
+                do {
+                    let result = try await submit(job: request)
+                    continuation.yield(
+                        GeminiTextStreamChunk(
+                            textDelta: result.metadata.prompt,
+                            modelIdentifier: result.metadata.model,
+                            isTerminal: true
+                        )
+                    )
+                    continuation.finish()
+                } catch {
+                    continuation.finish(throwing: error)
+                }
+            }
+        }
+    }
 }
 
 public protocol GeminiImageServiceProtocol: Sendable {
