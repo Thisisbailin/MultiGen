@@ -11,125 +11,89 @@ import Foundation
 @MainActor
 final class AppDependencies: ObservableObject {
     let configuration: AppConfiguration
-    let credentialsStore: CredentialsStoreProtocol
     let auditRepository: AuditRepositoryProtocol
-    private let primaryTextService: GeminiTextServiceProtocol
-    private let primaryImageService: GeminiImageServiceProtocol
-    private let relayTextService: GeminiTextServiceProtocol
-    private let relayImageService: GeminiImageServiceProtocol
+    private let relayTextService: AITextServiceProtocol
+    private let relayImageService: AIImageServiceProtocol
+    private let relayVideoService: RelayVideoService
 
     init(
         configuration: AppConfiguration,
-        credentialsStore: CredentialsStoreProtocol,
         auditRepository: AuditRepositoryProtocol,
-        primaryTextService: GeminiTextServiceProtocol,
-        primaryImageService: GeminiImageServiceProtocol,
-        relayTextService: GeminiTextServiceProtocol,
-        relayImageService: GeminiImageServiceProtocol
+        relayTextService: AITextServiceProtocol,
+        relayImageService: AIImageServiceProtocol,
+        relayVideoService: RelayVideoService
     ) {
         self.configuration = configuration
-        self.credentialsStore = credentialsStore
         self.auditRepository = auditRepository
-        self.primaryTextService = primaryTextService
-        self.primaryImageService = primaryImageService
         self.relayTextService = relayTextService
         self.relayImageService = relayImageService
+        self.relayVideoService = relayVideoService
     }
 
-    func textService() -> GeminiTextServiceProtocol {
-        if configuration.relayTextSettingsSnapshot() != nil { return relayTextService }
-        return primaryTextService
+    func textService() -> AITextServiceProtocol {
+        relayTextService
     }
 
-    func imageService() -> GeminiImageServiceProtocol {
-        if configuration.relayImageSettingsSnapshot() != nil { return relayImageService }
-        return primaryImageService
+    func imageService() -> AIImageServiceProtocol {
+        relayImageService
     }
 
-    func currentTextRoute() -> GeminiRoute {
-        configuration.relayTextSettingsSnapshot() != nil ? .relay : .official
+    func videoService() -> RelayVideoService {
+        relayVideoService
     }
 
-    func currentImageRoute() -> GeminiRoute {
-        configuration.relayImageSettingsSnapshot() != nil ? .relay : .official
-    }
+    func currentTextRoute() -> AIRoute { .relay }
+    func currentImageRoute() -> AIRoute { .relay }
+    func currentVideoRoute() -> AIRoute { .relay }
 
     func currentTextModelLabel() -> String {
-        switch currentTextRoute() {
-        case .relay:
-            return configuration.relayTextSettingsSnapshot()?.model ?? "未配置中转模型"
-        case .official:
-            return configuration.textModel.displayName
-        }
+        configuration.relaySelectedTextModel ?? "未配置模型"
     }
 
     func currentImageModelLabel() -> String {
-        switch currentImageRoute() {
-        case .relay:
-            return configuration.relayImageSettingsSnapshot()?.model ?? "未配置中转模型"
-        case .official:
-            return configuration.imageModel.displayName
-        }
+        configuration.relaySelectedImageModel ?? "未配置模型"
+    }
+
+    func currentVideoModelLabel() -> String {
+        configuration.relaySelectedVideoModel ?? "未配置模型"
+    }
+
+    func currentMultimodalModelLabel() -> String {
+        configuration.relaySelectedMultimodalModel ?? configuration.relaySelectedTextModel ?? "未配置模型"
     }
 }
 
 extension AppDependencies {
     static func live() -> AppDependencies {
         let configuration = AppConfiguration()
-        let credentialsStore = KeychainCredentialsStore()
         let auditRepository = FileAuditRepository()
-        let textService = GeminiTextService(
-            credentialsStore: credentialsStore,
-            modelProvider: { [configuration] in
-                await MainActor.run {
-                    configuration.textModel
-                }
-            }
-        )
-        let imageService = GeminiImageService(
-            credentialsStore: credentialsStore,
-            modelProvider: { [configuration] in
-                await MainActor.run {
-                    configuration.imageModel
-                }
-            }
-        )
         let relayService = RelayTextService(configuration: configuration)
         let relayImageService = RelayImageService(configuration: configuration)
+        let relayVideoService = RelayVideoService(configuration: configuration)
 
         return AppDependencies(
             configuration: configuration,
-            credentialsStore: credentialsStore,
             auditRepository: auditRepository,
-            primaryTextService: textService,
-            primaryImageService: imageService,
             relayTextService: relayService,
-            relayImageService: relayImageService
+            relayImageService: relayImageService,
+            relayVideoService: relayVideoService
         )
     }
 
     static func preview() -> AppDependencies {
         let defaults = UserDefaults(suiteName: "preview.multigen.\(UUID().uuidString)")!
-        let configuration = AppConfiguration(
-            defaults: defaults,
-            initialTextModel: .flash25,
-            initialImageModel: .flash25ImagePreview
-        )
-        let credentialsStore = MockCredentialsStore()
+        let configuration = AppConfiguration(defaults: defaults)
         let auditRepository = MemoryAuditRepository()
-        let mockText = MockGeminiService(simulatedDelay: 0.3)
-        let mockImage = MockImageService()
         let relayService = RelayTextService(configuration: configuration)
         let relayImageService = RelayImageService(configuration: configuration)
+        let relayVideoService = RelayVideoService(configuration: configuration)
 
         return AppDependencies(
             configuration: configuration,
-            credentialsStore: credentialsStore,
             auditRepository: auditRepository,
-            primaryTextService: mockText,
-            primaryImageService: mockImage,
             relayTextService: relayService,
-            relayImageService: relayImageService
+            relayImageService: relayImageService,
+            relayVideoService: relayVideoService
         )
     }
 }

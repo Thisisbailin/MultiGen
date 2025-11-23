@@ -7,7 +7,7 @@ Objective:
 Out-of-scope:
 - 影像模块（影像/文生图/图生图）的重新设计与实现。
 - 主页（ScenarioOverview）和资料库其余资产（角色/场景卡牌）的复杂交互。
-- 更换 Gemini 服务或联网能力。
+- 更换中转服务或联网能力。
 
 Inputs / Outputs (contracts):
 - 输入：ScriptsStore 中的 `ScriptProject/ScriptEpisode/ScriptScene`，StoryboardStore 中与剧集绑定的 `StoryboardWorkspace`。

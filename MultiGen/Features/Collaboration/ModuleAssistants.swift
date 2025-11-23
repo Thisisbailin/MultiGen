@@ -12,7 +12,7 @@ struct ModuleAssistantSwitcher: View {
     var body: some View {
         switch module {
         case .general:
-            assistantPanel(title: "智能协同助手", message: "与 Gemini 聊天以获取灵感、提问或继续项目流程。")
+            assistantPanel(title: "智能协同助手", message: "与 AI 聊天以获取灵感、提问或继续项目流程。")
         case .script:
             VStack(alignment: .leading, spacing: 8) {
                 Text("剧本助手")
@@ -79,7 +79,7 @@ private extension View {
             .frame(maxWidth: .infinity, alignment: .leading)
             .background(
                 RoundedRectangle(cornerRadius: 12, style: .continuous)
-                    .fill(Color(nsColor: .controlBackgroundColor))
+                    .fill(Color(nsColor: .windowBackgroundColor))
             )
     }
 }

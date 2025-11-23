@@ -1,8 +1,8 @@
 # Plan — ai-action-center
 Architecture Intent Block:
 - 仅面向 macOS，维持 Domain → Platform Services → Features → UI 的依赖方向；新的 AI 中枢（AIActionCenter）位于 Feature 层，由 `AppDependencies` 注入各视图/Store。
-- 所有 Gemini 请求（文本/图像、官网/中转）都经由 AIActionCenter 统一构造 `SceneJobRequest`，并在此处记录审计、路由、上下文，Sidebar 负责展示结果。
-- 各业务模块（智能协同 Sidebar、剧本项目总结、分镜自动写入、影像 MVP、设置诊断）通过传入来源/上下文描述来声明需求，AIActionCenter 负责路由到文本或图像服务并把结果回传模块。
+- 所有 OpenAI 样式中转请求（文本/图像/视频）都经由 AIActionCenter 统一构造 `SceneJobRequest`，并在此处记录审计、路由、上下文，Sidebar 负责展示结果。
+- 各业务模块（智能协同 Sidebar、剧本项目总结、分镜自动写入、影像 MVP、设置诊断）通过传入来源/上下文描述来声明需求，AIActionCenter 负责路由到文本/图像/视频服务并把结果回传模块。
 
 Work Breakdown (≤1 day each):
 1. **AIActionCenter 基础** — 在 `MultiGen/Features/Sidebar` 下实现 `AIActionKind`, `AIActionRequest`, `AIActionResult`, `AIActionCenter`，支持文本/图像通道、Prompt Library 读取、上下文描述、审计写入，并暴露环境对象给所有视图。回滚点：保留旧的直接 `textService/imageService` 调用路径，并以编译 Flag 切换。
@@ -12,7 +12,7 @@ Work Breakdown (≤1 day each):
 Verification Plan (by AC):
 - AC1（中心化路由）：运行 `xcodebuild -scheme MultiGen -destination "platform=macOS"` 确认 ActionCenter 编译无误；通过单步调试或日志验证 `AIActionCenter.perform` 收到 Sidebar 及其它模块的请求。
 - AC2（Sidebar/剧本/分镜）：在模拟数据下发送普通对话与项目总结，检查 Sidebar 系统消息包含“模型 · 路线”，Storyboard Handler 正常获得 JSON 并追加系统提示。
-- AC3（影像/设置）：触发 Imaging 生成与设置测试请求，确保状态提示与审计记录（可通过控制台日志或临时断点）均来自 ActionCenter。
+- AC3（影像/视频/设置）：触发 Imaging 图像/视频生成与设置测试请求，确保状态提示与审计记录（可通过控制台日志或临时断点）均来自 ActionCenter。
 
 Rollback Points:
 - 若 ActionCenter 引入后导致 UI 崩溃，可将 `ContentView` 中的 `.environmentObject(actionCenter)` 移除，并恢复原有 `requestAIResponse` 流程。

@@ -18,6 +18,7 @@ public enum SceneJobStatus: String, Codable, Sendable {
 public enum SceneJobChannel: String, Codable, Sendable {
     case text
     case image
+    case video
 }
 
 public struct SceneJobRequest: Identifiable, Hashable, Codable, Sendable {
@@ -54,11 +55,13 @@ public struct SceneJobResult: Hashable, Codable, Sendable {
 
     public let imageURL: URL?
     public let imageBase64: String?
+    public let videoURL: URL?
     public let metadata: Metadata
 
-    public init(imageURL: URL?, imageBase64: String? = nil, metadata: Metadata) {
+    public init(imageURL: URL?, imageBase64: String? = nil, videoURL: URL? = nil, metadata: Metadata) {
         self.imageURL = imageURL
         self.imageBase64 = imageBase64
+        self.videoURL = videoURL
         self.metadata = metadata
     }
 }

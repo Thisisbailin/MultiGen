@@ -31,6 +31,7 @@ final class StoryboardDialogueStore: ObservableObject {
     private let storyboardStore: StoryboardStore
     private let parser = StoryboardResponseParser()
     private var cancellables: Set<AnyCancellable> = []
+    private var episodeSelectionNonce: UInt = 0
 
     init(
         scriptStore: ScriptStore,
@@ -57,11 +58,11 @@ final class StoryboardDialogueStore: ObservableObject {
         observeStores()
         if let defaultEpisodeID,
            episodes.contains(where: { $0.id == defaultEpisodeID }) {
-            selectEpisode(id: defaultEpisodeID)
+            applyEpisodeSelection(id: defaultEpisodeID)
         } else if let firstEpisode = episodes.first {
-            selectEpisode(id: firstEpisode.id)
+            applyEpisodeSelection(id: firstEpisode.id)
         } else {
-            selectEpisode(id: nil)
+            applyEpisodeSelection(id: nil)
         }
     }
 
@@ -139,6 +140,15 @@ final class StoryboardDialogueStore: ObservableObject {
     }
 
     func selectEpisode(id: UUID?) {
+        episodeSelectionNonce &+= 1
+        let nonce = episodeSelectionNonce
+        Task { @MainActor [weak self] in
+            guard let self, nonce == self.episodeSelectionNonce else { return }
+            self.applyEpisodeSelection(id: id)
+        }
+    }
+
+    private func applyEpisodeSelection(id: UUID?) {
         guard let id else {
             selectedEpisode = nil
             workspace = nil
@@ -158,6 +168,9 @@ final class StoryboardDialogueStore: ObservableObject {
         if selectedProjectID != project.id {
             selectedProjectID = project.id
             episodes = project.orderedEpisodes
+        }
+        if selectedEpisode?.id == id {
+            return
         }
         selectedEpisode = episode
         workspace = storyboardStore.ensureWorkspace(for: episode)

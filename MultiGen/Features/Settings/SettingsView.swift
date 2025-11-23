@@ -3,7 +3,9 @@ import AppKit
 
 private enum SettingsSection: Hashable, CaseIterable, Identifiable {
     case general
-    case gemini
+    case flow
+    case collaboration
+    case agent
     case about
 
     var id: Self { self }
@@ -11,7 +13,9 @@ private enum SettingsSection: Hashable, CaseIterable, Identifiable {
     var title: String {
         switch self {
         case .general: return "通用"
-        case .gemini: return "Gemini"
+        case .flow: return "流程"
+        case .collaboration: return "协同"
+        case .agent: return "代理"
         case .about: return "关于"
         }
     }
@@ -19,7 +23,9 @@ private enum SettingsSection: Hashable, CaseIterable, Identifiable {
     var icon: String {
         switch self {
         case .general: return "gearshape"
-        case .gemini: return "sparkles"
+        case .flow: return "arrow.triangle.branch"
+        case .collaboration: return "sparkles"
+        case .agent: return "person.2"
         case .about: return "info.circle"
         }
     }
@@ -30,32 +36,34 @@ struct SettingsView: View {
     @State private var selection: SettingsSection = .general
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 16) {
-            VStack(alignment: .leading, spacing: 4) {
-                Text("应用设置")
-                    .font(.system(.largeTitle, weight: .semibold))
-                Text("集中管理外观偏好、Gemini 连接与应用信息。")
-                    .foregroundStyle(.secondary)
-            }
-
+        VStack(alignment: .leading, spacing: 12) {
             TabView(selection: $selection) {
                 GeneralSettingsTab()
                     .tabItem {
                         Label(SettingsSection.general.title, systemImage: SettingsSection.general.icon)
                     }
                     .tag(SettingsSection.general)
-                GeminiSettingsTab()
+                FlowSettingsTab()
                     .tabItem {
-                        Label(SettingsSection.gemini.title, systemImage: SettingsSection.gemini.icon)
+                        Label(SettingsSection.flow.title, systemImage: SettingsSection.flow.icon)
                     }
-                    .tag(SettingsSection.gemini)
+                    .tag(SettingsSection.flow)
+                CollaborationSettingsTab()
+                    .tabItem {
+                        Label(SettingsSection.collaboration.title, systemImage: SettingsSection.collaboration.icon)
+                    }
+                    .tag(SettingsSection.collaboration)
+                AgentSettingsTab()
+                    .tabItem {
+                        Label(SettingsSection.agent.title, systemImage: SettingsSection.agent.icon)
+                    }
+                    .tag(SettingsSection.agent)
                 AboutSettingsTab()
                     .tabItem {
                         Label(SettingsSection.about.title, systemImage: SettingsSection.about.icon)
                     }
                     .tag(SettingsSection.about)
             }
-            .padding(.top, 8)
 
             HStack {
                 Spacer()
@@ -76,13 +84,6 @@ private struct GeneralSettingsTab: View {
         Binding(
             get: { configuration.appearance },
             set: { configuration.updateAppearance($0) }
-        )
-    }
-
-    private var aiMemoryBinding: Binding<Bool> {
-        Binding(
-            get: { configuration.aiMemoryEnabled },
-            set: { configuration.updateAIMemoryEnabled($0) }
         )
     }
 
@@ -110,15 +111,18 @@ private struct GeneralSettingsTab: View {
                 Text("历史中心统一管理各模块对话，可在其中查看、切换或删除记录。")
                     .font(.footnote)
                     .foregroundStyle(.secondary)
-                Text("提示：对话历史默认始终保存于本地（仅当前设备），关闭应用后也可继续同一对话。")
-                    .font(.footnote)
-                    .foregroundStyle(.secondary)
             }
+        }
+        .formStyle(.grouped)
+        .padding(.horizontal, 4)
+    }
+}
 
-            Section("AI 记忆") {
-                Toggle("启用 AI 记忆能力", isOn: aiMemoryBinding)
-                Text("开启后，我们会在单次对话中自动注入近期历史上下文，帮助 Gemini 记住之前的交流。")
-                    .font(.footnote)
+private struct FlowSettingsTab: View {
+    var body: some View {
+        Form {
+            Section("流程") {
+                Text("流程配置即将上线，敬请期待。")
                     .foregroundStyle(.secondary)
             }
         }
@@ -127,69 +131,89 @@ private struct GeneralSettingsTab: View {
     }
 }
 
-private struct GeminiSettingsTab: View {
-    @EnvironmentObject private var dependencies: AppDependencies
+private struct AgentSettingsTab: View {
+    var body: some View {
+        Form {
+            Section("代理") {
+                Text("代理能力配置即将上线。")
+                    .foregroundStyle(.secondary)
+            }
+        }
+        .formStyle(.grouped)
+        .padding(.horizontal, 4)
+    }
+}
+
+private struct CollaborationSettingsTab: View {
+    enum TestChannel: String, CaseIterable, Identifiable {
+        case text
+        case image
+        case video
+
+        var id: String { rawValue }
+
+        var title: String {
+            switch self {
+            case .text: return "文本"
+            case .image: return "图像"
+            case .video: return "视频"
+            }
+        }
+
+        var promptPlaceholder: String {
+            switch self {
+            case .text: return "请回复 OK"
+            case .image: return "一张简洁的测试图片"
+            case .video: return "一个 2 秒的简短测试视频"
+            }
+        }
+    }
+
     @EnvironmentObject private var actionCenter: AIActionCenter
     @EnvironmentObject private var configuration: AppConfiguration
 
-    @State private var apiKeyInput: String = ""
-    @State private var keyStatus: String = "未检测"
-    @State private var selectedTextModel: GeminiModel = .defaultTextModel
-    @State private var selectedImageModel: GeminiModel = .defaultImageModel
-    @State private var feedbackMessage: String?
-    @State private var feedbackColor: Color = .secondary
-    @State private var isTestingConnection = false
-    @State private var showInputPlaintext = false
-    @State private var revealStoredKey = false
-    @State private var storedKeyPlaintext: String?
-
-    @State private var relayEnabled = false
-    @State private var relayProviderName = ""
+    @State private var providerName = ""
     @State private var relayBaseURL = ""
     @State private var relayAPIKey = ""
     @State private var relayModels: [String] = []
     @State private var relaySelectedTextModel: String = ""
     @State private var relaySelectedImageModel: String = ""
+    @State private var relaySelectedVideoModel: String = ""
+    @State private var relaySelectedMultimodalModel: String = ""
     @State private var isSyncingRelayModels = false
+    @State private var syncStatus: String?
 
-    @State private var textTestInput: String = ""
-    @State private var textTestResponse: String = ""
-    @State private var isSubmittingTextTest = false
-    @State private var isSubmittingImageTest = false
-    @State private var imageTestStatus: String?
-    @State private var imageTestImage: NSImage?
+    @State private var testChannel: TestChannel = .text
+    @State private var textTestInput: String = TestChannel.text.promptPlaceholder
+    @State private var imageTestInput: String = TestChannel.image.promptPlaceholder
+    @State private var videoTestInput: String = TestChannel.video.promptPlaceholder
+    @State private var testStatus: String?
+    @State private var testResponse: String = ""
+    @State private var testImage: NSImage?
+    @State private var testVideoURL: URL?
+    @State private var isTesting = false
+
     @State private var isExportingAudit = false
 
-    var body: some View {
-        VStack(alignment: .leading, spacing: 16) {
-            Form {
-                modelSection
-                apiKeySection
-                testSection
-                imageTestSection
-                relaySection
-                auditSection
-            }
-            .formStyle(.grouped)
+    private var aiMemoryBinding: Binding<Bool> {
+        Binding(
+            get: { configuration.aiMemoryEnabled },
+            set: { configuration.updateAIMemoryEnabled($0) }
+        )
+    }
 
-            if let feedbackMessage {
-                Text(feedbackMessage)
-                    .font(.subheadline)
-                    .foregroundStyle(feedbackColor)
-            }
+    var body: some View {
+        Form {
+            providerSection
+            modelSection
+            aiMemorySection
+            availabilityTestSection
+            auditSection
         }
+        .formStyle(.grouped)
         .padding(.horizontal, 4)
         .onAppear(perform: loadState)
-        .onChange(of: selectedTextModel) { _, newValue in
-            configuration.updateTextModel(newValue)
-        }
-        .onChange(of: selectedImageModel) { _, newValue in
-            configuration.updateImageModel(newValue)
-        }
-        .onChange(of: relayEnabled) { _, newValue in
-            configuration.updateRelayEnabled(newValue)
-        }
-        .onChange(of: relayProviderName) { _, newValue in
+        .onChange(of: providerName) { _, newValue in
             configuration.updateRelayProvider(name: newValue)
         }
         .onChange(of: relayBaseURL) { _, _ in
@@ -204,219 +228,154 @@ private struct GeminiSettingsTab: View {
         .onChange(of: relaySelectedImageModel) { _, newValue in
             configuration.updateRelaySelectedImageModel(newValue.isEmpty ? nil : newValue)
         }
+        .onChange(of: relaySelectedVideoModel) { _, newValue in
+            configuration.updateRelaySelectedVideoModel(newValue.isEmpty ? nil : newValue)
+        }
+        .onChange(of: relaySelectedMultimodalModel) { _, newValue in
+            configuration.updateRelaySelectedMultimodalModel(newValue.isEmpty ? nil : newValue)
+        }
     }
 
     @ViewBuilder
-    private var modelSection: some View {
-        Section("模型设置") {
-            Picker("文本模型", selection: $selectedTextModel) {
-                ForEach(GeminiModel.textOptions) { model in
-                    Text(model.displayName).tag(model)
+    private var providerSection: some View {
+        Section("提供商") {
+            TextField("服务名称", text: $providerName)
+            TextField("API 地址", text: $relayBaseURL)
+            SecureField("密钥", text: $relayAPIKey)
+
+            Button {
+                Task { await fetchRelayModels() }
+            } label: {
+                if isSyncingRelayModels {
+                    ProgressView()
+                } else {
+                    Label("同步模型列表", systemImage: "arrow.clockwise")
                 }
             }
-            Picker("图像模型", selection: $selectedImageModel) {
-                ForEach(GeminiModel.imageOptions) { model in
-                    Text(model.displayName).tag(model)
-                }
+            .buttonStyle(.bordered)
+            .disabled(isSyncingRelayModels)
+
+            if let syncStatus {
+                Text(syncStatus)
+                    .font(.footnote)
+                    .foregroundStyle(.secondary)
             }
         }
     }
 
     @ViewBuilder
-    private var imageTestSection: some View {
-        Section("图像连通性测试") {
-            VStack(alignment: .leading, spacing: 8) {
-                Text("使用当前图像模型发起一次简单生成，确认官方或中转路线可用。")
+    private var modelSection: some View {
+        Section("模型") {
+            if relayModels.isEmpty {
+                Text("请先同步模型列表。")
                     .font(.footnote)
                     .foregroundStyle(.secondary)
-                Button {
-                    submitImageTest()
-                } label: {
-                    if isSubmittingImageTest {
-                        ProgressView()
-                    } else {
-                        Label("生成测试图像", systemImage: "sparkles")
+            }
+            Picker("文本模型", selection: $relaySelectedTextModel) {
+                ForEach(relayModels, id: \.self) { id in
+                    Text(id).tag(id)
+                }
+            }
+            .disabled(relayModels.isEmpty)
+
+            Picker("多模态模型", selection: $relaySelectedMultimodalModel) {
+                ForEach(relayModels, id: \.self) { id in
+                    Text(id).tag(id)
+                }
+            }
+            .disabled(relayModels.isEmpty)
+
+            Picker("图像模型", selection: $relaySelectedImageModel) {
+                ForEach(relayModels, id: \.self) { id in
+                    Text(id).tag(id)
+                }
+            }
+            .disabled(relayModels.isEmpty)
+
+            Picker("视频模型", selection: $relaySelectedVideoModel) {
+                ForEach(relayModels, id: \.self) { id in
+                    Text(id).tag(id)
+                }
+            }
+            .disabled(relayModels.isEmpty)
+        }
+    }
+
+    @ViewBuilder
+    private var aiMemorySection: some View {
+        Section("AI 记忆") {
+            Toggle("启用 AI 记忆能力", isOn: aiMemoryBinding)
+            Text("开启后，我们会在单次对话中自动注入近期历史上下文。")
+                .font(.footnote)
+                .foregroundStyle(.secondary)
+        }
+    }
+
+    @ViewBuilder
+    private var availabilityTestSection: some View {
+        Section("可用性测试") {
+            Picker("测试类型", selection: $testChannel) {
+                ForEach(TestChannel.allCases) { channel in
+                    Text(channel.title).tag(channel)
+                }
+            }
+            .pickerStyle(.segmented)
+
+            TextField("测试提示词", text: currentPromptBinding, axis: .vertical)
+                .textFieldStyle(.roundedBorder)
+                .lineLimit(3, reservesSpace: true)
+
+            Button {
+                Task { await runAvailabilityTest() }
+            } label: {
+                if isTesting {
+                    ProgressView()
+                } else {
+                    Label("开始测试", systemImage: "paperplane.fill")
+                }
+            }
+            .buttonStyle(.borderedProminent)
+            .disabled(isTesting || relayModels.isEmpty)
+
+            if let testStatus {
+                Text(testStatus)
+                    .font(.footnote)
+                    .foregroundStyle(.secondary)
+            }
+
+            switch testChannel {
+            case .text:
+                if testResponse.isEmpty == false {
+                    ScrollView {
+                        Text(testResponse)
+                            .frame(maxWidth: .infinity, alignment: .leading)
                     }
+                    .frame(minHeight: 100, maxHeight: 180)
+                    .padding(8)
+                    .background(
+                        RoundedRectangle(cornerRadius: 10, style: .continuous)
+                            .fill(Color(nsColor: .windowBackgroundColor))
+                    )
                 }
-                .buttonStyle(.borderedProminent)
-                .disabled(isSubmittingImageTest)
-
-                if let imageTestStatus {
-                    Text(imageTestStatus)
-                        .font(.footnote)
-                        .foregroundStyle(.secondary)
-                }
-
-                if let preview = imageTestImage {
+            case .image:
+                if let preview = testImage {
                     Image(nsImage: preview)
                         .resizable()
                         .scaledToFit()
-                        .frame(maxHeight: 160)
+                        .frame(maxHeight: 180)
                         .cornerRadius(12)
                         .overlay(
                             RoundedRectangle(cornerRadius: 12, style: .continuous)
                                 .stroke(Color.secondary.opacity(0.2))
                         )
                 }
-            }
-        }
-    }
-
-    @ViewBuilder
-    private var apiKeySection: some View {
-        Section("API Key") {
-            HStack {
-                if showInputPlaintext {
-                    TextField("输入 Gemini API Key", text: $apiKeyInput)
-                } else {
-                    SecureField("输入 Gemini API Key", text: $apiKeyInput)
+            case .video:
+                if let url = testVideoURL {
+                    Text(url.absoluteString)
+                        .font(.footnote)
+                        .foregroundStyle(.secondary)
+                        .textSelection(.enabled)
                 }
-                Button {
-                    showInputPlaintext.toggle()
-                } label: {
-                    Image(systemName: showInputPlaintext ? "eye.slash" : "eye")
-                }
-                .help(showInputPlaintext ? "隐藏输入内容" : "显示输入内容")
-            }
-
-            HStack(spacing: 8) {
-                Text("当前状态：\(keyStatus)")
-                    .font(.footnote)
-                    .foregroundStyle(.secondary)
-                if isKeyActive {
-                    Button(revealStoredKey ? "隐藏密钥" : "查看密钥") {
-                        withAnimation(.easeInOut) { revealStoredKey.toggle() }
-                    }
-                    .buttonStyle(.bordered)
-                }
-                Spacer()
-                Button("保存密钥") { saveKey() }
-                    .buttonStyle(.borderedProminent)
-                Button("清除密钥", role: .destructive) { clearKey() }
-            }
-            if revealStoredKey, let storedKeyPlaintext {
-                Text("当前密钥：\(storedKeyPlaintext)")
-                    .font(.footnote.monospaced())
-                    .textSelection(.enabled)
-                    .padding(8)
-                    .background(
-                        RoundedRectangle(cornerRadius: 8, style: .continuous)
-                            .fill(Color(nsColor: .controlBackgroundColor))
-                    )
-            }
-            HStack {
-                TextField("粘贴或输入新的密钥", text: $apiKeyInput)
-                    .textFieldStyle(.roundedBorder)
-                    .font(.body.monospaced())
-                    .disableAutocorrection(true)
-                Button("粘贴") {
-                    if let clipboard = NSPasteboard.general.string(forType: .string) {
-                        apiKeyInput = clipboard
-                    }
-                }
-            }
-        }
-    }
-
-    @ViewBuilder
-    private var testSection: some View {
-        Section("官方模型调试") {
-            VStack(alignment: .leading, spacing: 8) {
-                Text("输入任意提示词测试文本模型。")
-                    .font(.footnote)
-                    .foregroundStyle(.secondary)
-                TextField("向 Gemini 输入一句需求", text: $textTestInput, axis: .vertical)
-                    .textFieldStyle(.roundedBorder)
-                    .lineLimit(3, reservesSpace: true)
-                Button {
-                    submitTextTest()
-                } label: {
-                    if isSubmittingTextTest {
-                        ProgressView()
-                    } else {
-                        Label("发送测试", systemImage: "paperplane.fill")
-                    }
-                }
-                .buttonStyle(.borderedProminent)
-                .disabled(isSubmittingTextTest || textTestInput.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
-
-                if textTestResponse.isEmpty == false {
-                    if let imageURL = detectedImageURL(from: textTestResponse) {
-                        AsyncImage(url: imageURL) { phase in
-                            switch phase {
-                            case .success(let image):
-                                image
-                                    .resizable()
-                                    .scaledToFit()
-                                    .frame(maxHeight: 160)
-                                    .cornerRadius(12)
-                                    .overlay(
-                                        RoundedRectangle(cornerRadius: 12, style: .continuous)
-                                            .stroke(Color.secondary.opacity(0.2))
-                                    )
-                            case .failure:
-                                Text("图像加载失败：\(imageURL.absoluteString)")
-                                    .font(.footnote)
-                            case .empty:
-                                ProgressView()
-                            @unknown default:
-                                EmptyView()
-                            }
-                        }
-                    } else {
-                        ScrollView {
-                            Text(textTestResponse)
-                                .frame(maxWidth: .infinity, alignment: .leading)
-                        }
-                        .frame(minHeight: 100, maxHeight: 180)
-                        .padding(8)
-                        .background(
-                            RoundedRectangle(cornerRadius: 10, style: .continuous)
-                                .fill(Color(nsColor: .controlBackgroundColor))
-                        )
-                    }
-                }
-            }
-        }
-    }
-
-    @ViewBuilder
-    private var relaySection: some View {
-        Section("API 中转服务（可选）") {
-            Toggle("启用中转", isOn: $relayEnabled)
-            TextField("服务名称", text: $relayProviderName)
-            TextField("API 地址", text: $relayBaseURL)
-            SecureField("中转密钥", text: $relayAPIKey)
-
-            if relayModels.isEmpty == false {
-                Picker("文本模型", selection: $relaySelectedTextModel) {
-                    ForEach(relayModels, id: \.self) { id in
-                        Text(id).tag(id)
-                    }
-                }
-                Picker("图像模型", selection: $relaySelectedImageModel) {
-                    ForEach(relayModels, id: \.self) { id in
-                        Text(id).tag(id)
-                    }
-                }
-            }
-            HStack {
-                Button {
-                    Task { await fetchRelayModels() }
-                } label: {
-                    if isSyncingRelayModels {
-                        ProgressView()
-                    } else {
-                        Label("同步模型列表", systemImage: "arrow.clockwise")
-                    }
-                }
-                .buttonStyle(.bordered)
-
-                Button("测试连接") {
-                    Task { await testConnection() }
-                }
-                .buttonStyle(.borderedProminent)
-                .disabled(isTestingConnection)
             }
         }
     }
@@ -437,290 +396,270 @@ private struct GeminiSettingsTab: View {
         }
     }
 
-    private func loadState() {
-        selectedTextModel = configuration.textModel
-        selectedImageModel = configuration.imageModel
-        updateKeyStatus()
+    // MARK: - Helpers
 
-        relayEnabled = configuration.relayEnabled
-        relayProviderName = configuration.relayProviderName
+    private var currentPromptBinding: Binding<String> {
+        Binding<String>(
+            get: {
+                switch testChannel {
+                case .text: return textTestInput
+                case .image: return imageTestInput
+                case .video: return videoTestInput
+                }
+            },
+            set: { newValue in
+                switch testChannel {
+                case .text: textTestInput = newValue
+                case .image: imageTestInput = newValue
+                case .video: videoTestInput = newValue
+                }
+            }
+        )
+    }
+
+    private func loadState() {
+        providerName = configuration.relayProviderName
         relayBaseURL = configuration.relayAPIBase
         relayAPIKey = configuration.relayAPIKey
         relayModels = configuration.relayAvailableModels
         relaySelectedTextModel = configuration.relaySelectedTextModel ?? ""
         relaySelectedImageModel = configuration.relaySelectedImageModel ?? ""
+        relaySelectedVideoModel = configuration.relaySelectedVideoModel ?? ""
+        relaySelectedMultimodalModel = configuration.relaySelectedMultimodalModel ?? ""
     }
 
-    private func updateKeyStatus() {
-        do {
-            let key = try dependencies.credentialsStore.fetchAPIKey()
-            storedKeyPlaintext = key
-            keyStatus = "已保存（长度 \(key.count)）"
-        } catch CredentialsStoreError.notFound {
-            keyStatus = "未保存"
-            storedKeyPlaintext = nil
-        } catch {
-            keyStatus = "读取失败：\(error.localizedDescription)"
-            storedKeyPlaintext = nil
-        }
-    }
-
-    private func saveKey() {
-        guard apiKeyInput.isEmpty == false else {
-            feedbackColor = .orange
-            feedbackMessage = "请输入密钥再保存。"
-            return
-        }
-
-        do {
-            try dependencies.credentialsStore.save(apiKey: apiKeyInput)
-            storedKeyPlaintext = apiKeyInput
-            apiKeyInput = ""
-            updateKeyStatus()
-            feedbackColor = .green
-            feedbackMessage = "密钥已保存。"
-        } catch {
-            feedbackColor = .red
-            feedbackMessage = "保存失败：\(error.localizedDescription)"
-        }
-    }
-
-    private func clearKey() {
-        do {
-            try dependencies.credentialsStore.clear()
-            updateKeyStatus()
-            revealStoredKey = false
-            feedbackColor = .green
-            feedbackMessage = "密钥已清除。"
-        } catch {
-            feedbackColor = .red
-            feedbackMessage = "清除失败：\(error.localizedDescription)"
-        }
-    }
-
-    private func testConnection() async {
-        isTestingConnection = true
-        feedbackMessage = "正在测试连接..."
-        feedbackColor = .secondary
-
-        do {
-            let request = AIActionRequest(
-                kind: .diagnostics,
-                action: .aiConsole,
-                channel: .text,
-                fields: [
-                    "theme": "连接测试",
-                    "mood": "系统检测",
-                    "camera": "预设"
-                ],
-                assetReferences: [],
-                module: .aiConsole,
-                context: .general,
-                contextSummaryOverride: "设置 · 连接测试",
-                origin: "设置诊断"
-            )
-            let result = try await actionCenter.perform(request)
-            let snippet = (result.text ?? result.metadata.prompt).prefix(60)
-            feedbackColor = .green
-            feedbackMessage = "连接成功，返回内容片段：\(snippet)…"
-        } catch {
-            feedbackColor = .red
-            feedbackMessage = "测试失败：\(error.localizedDescription)"
-        }
-
-        isTestingConnection = false
-    }
-
-    private func submitTextTest() {
-        guard textTestInput.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty == false else { return }
-        isSubmittingTextTest = true
-        textTestResponse = ""
-
-        Task {
-            defer { isSubmittingTextTest = false }
-            do {
-                let request = AIActionRequest(
-                    kind: .diagnostics,
-                    action: .aiConsole,
-                    channel: .text,
-                    fields: ["prompt": textTestInput],
-                    assetReferences: [],
-                    module: .aiConsole,
-                    context: .general,
-                    contextSummaryOverride: "设置 · 文本测试",
-                    origin: "设置诊断"
-                )
-                let result = try await actionCenter.perform(request)
-                textTestResponse = result.text ?? result.metadata.prompt
-            } catch {
-                textTestResponse = "请求失败：\(error.localizedDescription)"
-            }
-        }
-    }
-
-    private func submitImageTest() {
-        isSubmittingImageTest = true
-        imageTestStatus = "正在生成连接测试图像…"
-        imageTestImage = nil
-
-        let request = AIActionRequest(
-            kind: .diagnostics,
-            action: .generateScene,
-            channel: .image,
-            fields: ["prompt": "连接测试：生成一张简单的静物照片，强调光影"],
-            assetReferences: [],
-            module: nil,
-            context: nil,
-            contextSummaryOverride: "设置 · 图像测试",
-            origin: "设置诊断"
-        )
-
-        Task {
-            defer { isSubmittingImageTest = false }
-            do {
-                let result = try await actionCenter.perform(request)
-                await MainActor.run {
-                    imageTestStatus = "生成成功 · \(result.metadata.model) · \(result.route.displayName)"
-                    imageTestImage = result.image
-                    if result.image == nil {
-                        imageTestStatus = "生成成功但未返回图像数据。"
-                    }
-                }
-            } catch {
-                await MainActor.run {
-                    imageTestStatus = "图像测试失败：\(error.localizedDescription)"
-                    imageTestImage = nil
-                }
-            }
-        }
-    }
-
-    private func detectedImageURL(from text: String) -> URL? {
-        let pattern = #"!\[[^\]]*\]\((.*?)\)"#
-        if let regex = try? NSRegularExpression(pattern: pattern, options: []) {
-            let range = NSRange(text.startIndex..<text.endIndex, in: text)
-            if let match = regex.firstMatch(in: text, options: [], range: range),
-               let urlRange = Range(match.range(at: 1), in: text) {
-                return URL(string: String(text[urlRange]))
-            }
-        }
-        return nil
-    }
+    // MARK: - Actions
 
     private func fetchRelayModels() async {
-        guard relayEnabled else { return }
+        isSyncingRelayModels = true
+        syncStatus = nil
+        defer { isSyncingRelayModels = false }
+
         let base = relayBaseURL.trimmingCharacters(in: .whitespacesAndNewlines)
         let key = relayAPIKey.trimmingCharacters(in: .whitespacesAndNewlines)
         guard base.isEmpty == false, key.isEmpty == false else {
-            feedbackColor = .orange
-            feedbackMessage = "请先填写 API 地址和中转密钥。"
+            syncStatus = "请先填写 API 地址与密钥。"
             return
         }
-        isSyncingRelayModels = true
-        defer { isSyncingRelayModels = false }
 
-        let endpoint = RelaySettingsSnapshot.normalize(baseURL: base) + "/v1/models"
-        guard let url = URL(string: endpoint) else {
-            feedbackColor = .red
-            feedbackMessage = "API 地址无效。"
+        let modelsEndpoint: String
+        if base.hasSuffix("/models") {
+            modelsEndpoint = base
+        } else if base.hasSuffix("/") {
+            modelsEndpoint = base + "models"
+        } else {
+            modelsEndpoint = base + "/models"
+        }
+
+        guard let url = URL(string: modelsEndpoint) else {
+            syncStatus = "API 地址格式不正确。"
             return
         }
 
         var request = URLRequest(url: url)
         request.httpMethod = "GET"
+        request.setValue("application/json", forHTTPHeaderField: "Accept")
         request.setValue("Bearer \(key)", forHTTPHeaderField: "Authorization")
 
         do {
             let (data, response) = try await URLSession.shared.data(for: request)
-            guard let httpResponse = response as? HTTPURLResponse, (200..<300).contains(httpResponse.statusCode) else {
-                throw URLError(.badServerResponse)
+            guard let http = response as? HTTPURLResponse else {
+                syncStatus = "无效响应。"
+                return
             }
-            let modelList = try JSONDecoder().decode(RelayModelList.self, from: data)
-            let ids = modelList.data.map { $0.id }
-            relayModels = ids
-            if relaySelectedTextModel.isEmpty {
-                relaySelectedTextModel = ids.first ?? ""
+            guard (200..<300).contains(http.statusCode) else {
+                let body = String(data: data, encoding: .utf8) ?? ""
+                syncStatus = "HTTP \(http.statusCode)：\(body)"
+                return
             }
-            if relaySelectedImageModel.isEmpty {
-                relaySelectedImageModel = ids.first ?? ""
+
+            let models = try parseModelIDs(from: data)
+            guard models.isEmpty == false else {
+                syncStatus = "未获取到模型列表。"
+                return
             }
-            configuration.updateRelayModels(ids)
-            configuration.updateRelaySelectedTextModel(relaySelectedTextModel.isEmpty ? nil : relaySelectedTextModel)
-            configuration.updateRelaySelectedImageModel(relaySelectedImageModel.isEmpty ? nil : relaySelectedImageModel)
-            feedbackColor = .green
-            feedbackMessage = "已同步 \(ids.count) 个模型。"
+
+            relayModels = models
+            configuration.updateRelayModels(models)
+
+            if relaySelectedTextModel.isEmpty { relaySelectedTextModel = models.first ?? "" }
+            if relaySelectedImageModel.isEmpty { relaySelectedImageModel = models.first ?? "" }
+            if relaySelectedVideoModel.isEmpty { relaySelectedVideoModel = models.first ?? "" }
+            if relaySelectedMultimodalModel.isEmpty { relaySelectedMultimodalModel = models.first ?? "" }
+            syncStatus = "同步完成，共 \(models.count) 个模型。"
         } catch {
-            feedbackColor = .red
-            feedbackMessage = "同步失败：\(error.localizedDescription)"
+            syncStatus = "同步失败：\(error.localizedDescription)"
         }
     }
 
-    private var isKeyActive: Bool {
-        guard let key = storedKeyPlaintext else { return false }
-        return key.isEmpty == false
+    private func parseModelIDs(from data: Data) throws -> [String] {
+        struct ModelListResponse: Decodable {
+            struct ModelInfo: Decodable {
+                let id: String?
+                let name: String?
+            }
+            let data: [ModelInfo]?
+            let models: [ModelInfo]?
+        }
+
+        if let decoded = try? JSONDecoder().decode(ModelListResponse.self, from: data) {
+            let ids = (decoded.data ?? []) + (decoded.models ?? [])
+            let names = ids.compactMap { $0.id ?? $0.name }
+            return Array(Set(names)).sorted()
+        }
+
+        if let array = try? JSONDecoder().decode([String].self, from: data) {
+            return array.sorted()
+        }
+
+        if let single = String(data: data, encoding: .utf8) {
+            let ids = single
+                .split(whereSeparator: { $0.isWhitespace || $0 == "," })
+                .map(String.init)
+                .filter { $0.isEmpty == false }
+            if ids.isEmpty == false { return ids }
+        }
+
+        return []
+    }
+
+    private func runAvailabilityTest() async {
+        isTesting = true
+        testStatus = nil
+        testResponse = ""
+        testImage = nil
+        testVideoURL = nil
+        defer { isTesting = false }
+
+        let prompt = currentPromptBinding.wrappedValue.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard prompt.isEmpty == false else {
+            testStatus = "请输入测试提示词。"
+            return
+        }
+
+        switch testChannel {
+        case .text:
+            guard relaySelectedTextModel.isEmpty == false else {
+                testStatus = "请先选择文本模型。"
+                return
+            }
+            await submitTextTest(prompt: prompt)
+        case .image:
+            guard relaySelectedImageModel.isEmpty == false else {
+                testStatus = "请先选择图像模型。"
+                return
+            }
+            await submitImageTest(prompt: prompt)
+        case .video:
+            guard relaySelectedVideoModel.isEmpty == false else {
+                testStatus = "请先选择视频模型。"
+                return
+            }
+            await submitVideoTest(prompt: prompt)
+        }
+    }
+
+    private func submitTextTest(prompt: String) async {
+        let request = AIActionRequest(
+            kind: .diagnostics,
+            action: .aiConsole,
+            channel: .text,
+            fields: ["prompt": prompt],
+            assetReferences: [],
+            module: .aiConsole,
+            context: .general,
+            contextSummaryOverride: "设置 · 文本可用性",
+            origin: "设置诊断"
+        )
+
+        do {
+            let stream = actionCenter.stream(request)
+            var collected = ""
+            for try await event in stream {
+                switch event {
+                case .partial(let delta):
+                    collected += delta
+                    testResponse = collected
+                case .completed(let result):
+                    testResponse = result.text ?? collected
+                }
+            }
+            testStatus = "文本测试完成。"
+        } catch {
+            testStatus = "失败：\(error.localizedDescription)"
+        }
+    }
+
+    private func submitImageTest(prompt: String) async {
+        let request = AIActionRequest(
+            kind: .diagnostics,
+            action: .generateScene,
+            channel: .image,
+            fields: ["prompt": prompt],
+            assetReferences: [],
+            module: .aiConsole,
+            context: .general,
+            contextSummaryOverride: "设置 · 图像可用性",
+            origin: "设置诊断"
+        )
+
+        do {
+            let result = try await actionCenter.perform(request)
+            if let image = result.image {
+                testImage = image
+                testStatus = "图像测试成功 · \(result.metadata.model)"
+            } else {
+                testStatus = "返回中未包含图像。"
+            }
+        } catch {
+            testStatus = "失败：\(error.localizedDescription)"
+        }
+    }
+
+    private func submitVideoTest(prompt: String) async {
+        let request = AIActionRequest(
+            kind: .diagnostics,
+            action: .generateScene,
+            channel: .video,
+            fields: ["prompt": prompt],
+            assetReferences: [],
+            module: .aiConsole,
+            context: .general,
+            contextSummaryOverride: "设置 · 视频可用性",
+            origin: "设置诊断"
+        )
+
+        do {
+            let result = try await actionCenter.perform(request)
+            if let url = result.videoURL {
+                testVideoURL = url
+                testStatus = "视频测试成功。"
+            } else {
+                testStatus = "未返回视频 URL。"
+            }
+        } catch {
+            testStatus = "失败：\(error.localizedDescription)"
+        }
     }
 
     private func exportAuditLog() {
         isExportingAudit = true
-        Task {
-            let entries = await dependencies.auditRepository.loadAllEntries()
-            guard entries.isEmpty == false else {
-                await MainActor.run {
-                    feedbackColor = .orange
-                    feedbackMessage = "暂无审计记录可导出。"
-                    isExportingAudit = false
-                }
-                return
-            }
-            await MainActor.run {
-                let panel = NSSavePanel()
-                panel.nameFieldStringValue = "MultiGen-Audit-\(Date.now.formatted(date: .numeric, time: .shortened)).json"
-                panel.canCreateDirectories = true
-                if panel.runModal() == .OK, let url = panel.url {
-                    do {
-                        let encoder = JSONEncoder()
-                        encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
-                        encoder.dateEncodingStrategy = .iso8601
-                        let data = try encoder.encode(entries)
-                        try data.write(to: url, options: .atomic)
-                        feedbackColor = .green
-                        feedbackMessage = "审计日志已导出：\(url.lastPathComponent)"
-                    } catch {
-                        feedbackColor = .red
-                        feedbackMessage = "导出失败：\(error.localizedDescription)"
-                    }
-                }
-                isExportingAudit = false
-            }
-        }
+        testStatus = "审计文件位于 Application Support/MultiGen/audit-log.json"
+        isExportingAudit = false
     }
 }
 
 private struct AboutSettingsTab: View {
     var body: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            Text("关于 MultiGen")
-                .font(.title2.bold())
-            Text("MultiGen 是一款面向影视创作流程的 macOS 原生应用，聚焦剧本、分镜与 AIGC 工作流的统一体验。")
-                .foregroundStyle(.secondary)
-            Divider()
-            HStack(spacing: 12) {
-                Text("开发者：Codex（占位）")
-                Spacer()
-                Link("访问开发者主页", destination: URL(string: "https://example.com/codex")!)
-                    .disabled(true)
+        Form {
+            Section("关于") {
+                Text("MultiGen — 智能协同创作工具（单一中转线路版）")
+                Text("当前版本仅使用 OpenAI 样式 API 中转，支持文本/图像/视频模型。")
+                    .font(.footnote)
+                    .foregroundStyle(.secondary)
             }
-            Spacer()
         }
-        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+        .formStyle(.grouped)
         .padding(.horizontal, 4)
     }
-}
-
-private struct RelayModelList: Decodable {
-    struct RelayModelInfo: Decodable {
-        let id: String
-    }
-
-    let data: [RelayModelInfo]
 }

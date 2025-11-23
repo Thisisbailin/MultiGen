@@ -33,23 +33,17 @@ enum AppAppearance: String, CaseIterable, Identifiable, Codable {
     }
 }
 
-public enum RelayProviderType: String, Codable, Sendable {
-    case openai
-}
-
 @MainActor
 final class AppConfiguration: ObservableObject {
     private enum Keys {
-        static let textModel = "app.configuration.textModel"
-        static let imageModel = "app.configuration.imageModel"
-        static let relayEnabled = "app.configuration.relay.enabled"
         static let relayProviderName = "app.configuration.relay.name"
-        static let relayProviderType = "app.configuration.relay.type"
         static let relayAPIBase = "app.configuration.relay.base"
         static let relayAPIKey = "app.configuration.relay.key"
         static let relayModels = "app.configuration.relay.models"
         static let relaySelectedTextModel = "app.configuration.relay.selectedTextModel"
         static let relaySelectedImageModel = "app.configuration.relay.selectedImageModel"
+        static let relaySelectedVideoModel = "app.configuration.relay.selectedVideoModel"
+        static let relaySelectedMultimodalModel = "app.configuration.relay.selectedMultimodalModel"
         static let appearance = "app.configuration.appearance"
         static let memoryEnabled = "app.configuration.memoryEnabled"
         static let aiMemoryEnabled = "app.configuration.aiMemoryEnabled"
@@ -57,89 +51,51 @@ final class AppConfiguration: ObservableObject {
 
     private let defaults: UserDefaults
 
-    @Published private(set) var textModel: GeminiModel
-    @Published private(set) var imageModel: GeminiModel
-
-    @Published private(set) var relayEnabled: Bool
     @Published private(set) var relayProviderName: String
-    @Published private(set) var relayProviderType: RelayProviderType
     @Published private(set) var relayAPIBase: String
     @Published private(set) var relayAPIKey: String
     @Published private(set) var relayAvailableModels: [String]
     @Published private(set) var relaySelectedTextModel: String?
     @Published private(set) var relaySelectedImageModel: String?
+    @Published private(set) var relaySelectedVideoModel: String?
+    @Published private(set) var relaySelectedMultimodalModel: String?
     @Published private(set) var appearance: AppAppearance
     @Published private(set) var memoryEnabled: Bool
     @Published private(set) var aiMemoryEnabled: Bool
 
-    init(
-        defaults: UserDefaults = .standard,
-        initialTextModel: GeminiModel? = nil,
-        initialImageModel: GeminiModel? = nil
-    ) {
+    init(defaults: UserDefaults = .standard) {
         self.defaults = defaults
 
-        let storedText = initialTextModel
-            ?? defaults.string(forKey: Keys.textModel)
-                .flatMap(GeminiModel.init(rawValue:))
-            ?? GeminiModel.defaultTextModel
-
-        let storedImage = initialImageModel
-            ?? defaults.string(forKey: Keys.imageModel)
-                .flatMap(GeminiModel.init(rawValue:))
-            ?? GeminiModel.defaultImageModel
-
-        let storedRelayEnabled = defaults.object(forKey: Keys.relayEnabled) as? Bool ?? false
-        let storedProviderName = defaults.string(forKey: Keys.relayProviderName) ?? ""
-        let storedProviderType = defaults.string(forKey: Keys.relayProviderType)
-            .flatMap(RelayProviderType.init(rawValue:)) ?? .openai
+        let storedProviderName = defaults.string(forKey: Keys.relayProviderName) ?? "OpenRouter"
         let storedBase = defaults.string(forKey: Keys.relayAPIBase) ?? ""
         let storedKey = defaults.string(forKey: Keys.relayAPIKey) ?? ""
         let storedModels = defaults.data(forKey: Keys.relayModels)
             .flatMap { try? JSONDecoder().decode([String].self, from: $0) } ?? []
         let storedTextSelected = defaults.string(forKey: Keys.relaySelectedTextModel)
         let storedImageSelected = defaults.string(forKey: Keys.relaySelectedImageModel)
+        let storedVideoSelected = defaults.string(forKey: Keys.relaySelectedVideoModel)
+        let storedMultimodalSelected = defaults.string(forKey: Keys.relaySelectedMultimodalModel)
         let storedAppearance = defaults.string(forKey: Keys.appearance)
             .flatMap(AppAppearance.init(rawValue:)) ?? .system
-        defaults.set(true, forKey: Keys.memoryEnabled)
-        let storedMemoryEnabled = true
+        let storedMemoryEnabled = defaults.object(forKey: Keys.memoryEnabled) as? Bool ?? true
         let storedAIMemoryEnabled = defaults.object(forKey: Keys.aiMemoryEnabled) as? Bool ?? false
 
-        _textModel = Published(initialValue: storedText)
-        _imageModel = Published(initialValue: storedImage)
-        _relayEnabled = Published(initialValue: storedRelayEnabled)
         _relayProviderName = Published(initialValue: storedProviderName)
-        _relayProviderType = Published(initialValue: storedProviderType)
         _relayAPIBase = Published(initialValue: storedBase)
         _relayAPIKey = Published(initialValue: storedKey)
         _relayAvailableModels = Published(initialValue: storedModels)
         _relaySelectedTextModel = Published(initialValue: storedTextSelected)
         _relaySelectedImageModel = Published(initialValue: storedImageSelected)
+        _relaySelectedVideoModel = Published(initialValue: storedVideoSelected)
+        _relaySelectedMultimodalModel = Published(initialValue: storedMultimodalSelected)
         _appearance = Published(initialValue: storedAppearance)
         _memoryEnabled = Published(initialValue: storedMemoryEnabled)
         _aiMemoryEnabled = Published(initialValue: storedAIMemoryEnabled)
     }
 
-    func updateTextModel(_ model: GeminiModel) {
-        textModel = model
-        defaults.set(model.rawValue, forKey: Keys.textModel)
-    }
-
-    func updateImageModel(_ model: GeminiModel) {
-        imageModel = model
-        defaults.set(model.rawValue, forKey: Keys.imageModel)
-    }
-
-    func updateRelayEnabled(_ enabled: Bool) {
-        relayEnabled = enabled
-        defaults.set(enabled, forKey: Keys.relayEnabled)
-    }
-
-    func updateRelayProvider(name: String, type: RelayProviderType = .openai) {
+    func updateRelayProvider(name: String) {
         relayProviderName = name
-        relayProviderType = type
         defaults.set(name, forKey: Keys.relayProviderName)
-        defaults.set(type.rawValue, forKey: Keys.relayProviderType)
     }
 
     func updateRelayEndpoint(baseURL: String, apiKey: String) {
@@ -166,6 +122,16 @@ final class AppConfiguration: ObservableObject {
         defaults.set(model, forKey: Keys.relaySelectedImageModel)
     }
 
+    func updateRelaySelectedVideoModel(_ model: String?) {
+        relaySelectedVideoModel = model
+        defaults.set(model, forKey: Keys.relaySelectedVideoModel)
+    }
+
+    func updateRelaySelectedMultimodalModel(_ model: String?) {
+        relaySelectedMultimodalModel = model
+        defaults.set(model, forKey: Keys.relaySelectedMultimodalModel)
+    }
+
     func updateMemoryEnabled(_ enabled: Bool) {
         memoryEnabled = enabled
         defaults.set(enabled, forKey: Keys.memoryEnabled)
@@ -176,18 +142,27 @@ final class AppConfiguration: ObservableObject {
         defaults.set(enabled, forKey: Keys.aiMemoryEnabled)
     }
 
-    func relayTextSettingsSnapshot() -> RelaySettingsSnapshot? {
-        guard relayEnabled,
-              relayProviderType == .openai,
-              let selected = relaySelectedTextModel,
+    func relayTextSettingsSnapshot(preferredModel: String? = nil) -> RelaySettingsSnapshot? {
+        let override = preferredModel?.trimmingCharacters(in: .whitespacesAndNewlines)
+        let model = (override?.isEmpty == false ? override : relaySelectedTextModel)
+        guard let model, model.isEmpty == false else { return nil }
+        return makeRelaySnapshot(selectedModel: model)
+    }
+
+    func relayImageSettingsSnapshot() -> RelaySettingsSnapshot? {
+        guard let selected = relaySelectedImageModel,
               selected.isEmpty == false else { return nil }
         return makeRelaySnapshot(selectedModel: selected)
     }
 
-    func relayImageSettingsSnapshot() -> RelaySettingsSnapshot? {
-        guard relayEnabled,
-              relayProviderType == .openai,
-              let selected = relaySelectedImageModel,
+    func relayVideoSettingsSnapshot() -> RelaySettingsSnapshot? {
+        guard let selected = relaySelectedVideoModel,
+              selected.isEmpty == false else { return nil }
+        return makeRelaySnapshot(selectedModel: selected)
+    }
+
+    func relayMultimodalSettingsSnapshot() -> RelaySettingsSnapshot? {
+        guard let selected = relaySelectedMultimodalModel,
               selected.isEmpty == false else { return nil }
         return makeRelaySnapshot(selectedModel: selected)
     }

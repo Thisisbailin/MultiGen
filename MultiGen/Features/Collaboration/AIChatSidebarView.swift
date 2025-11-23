@@ -296,22 +296,36 @@ private struct ChatHistorySheet: View {
                     Text(filter == nil ? "完成首次对话后，我们会在此显示记录。" : "当前模块还没有历史记录。")
                 }
             } else {
-                List(selection: $selection) {
-                    ForEach(filteredEntries) { entry in
-                        VStack(alignment: .leading, spacing: 4) {
-                            Text(entry.title)
-                                .font(.headline)
-                            Text(entry.subtitle)
-                                .font(.caption)
-                                .foregroundStyle(.secondary)
-                            Text(entry.preview)
-                                .font(.body)
-                                .lineLimit(2)
-                                .foregroundStyle(.primary)
+                ScrollView {
+                    LazyVStack(alignment: .leading, spacing: 8) {
+                        ForEach(filteredEntries) { entry in
+                            let isSelected = selection == entry.key
+                            Button {
+                                selection = entry.key
+                            } label: {
+                                VStack(alignment: .leading, spacing: 4) {
+                                    Text(entry.title)
+                                        .font(.headline)
+                                    Text(entry.subtitle)
+                                        .font(.caption)
+                                        .foregroundStyle(.secondary)
+                                    Text(entry.preview)
+                                        .font(.body)
+                                        .lineLimit(2)
+                                        .foregroundStyle(.primary)
+                                }
+                                .padding(10)
+                                .frame(maxWidth: .infinity, alignment: .leading)
+                                .background(
+                                    RoundedRectangle(cornerRadius: 10, style: .continuous)
+                                        .fill(isSelected ? Color.accentColor.opacity(0.14) : Color(nsColor: .windowBackgroundColor))
+                                )
+                            }
+                            .buttonStyle(.plain)
+                            .tag(entry.key)
                         }
-                        .padding(.vertical, 4)
-                        .tag(entry.key)
                     }
+                    .padding(.vertical, 6)
                 }
                 .frame(minHeight: 220)
             }

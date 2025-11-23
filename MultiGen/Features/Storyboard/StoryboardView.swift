@@ -100,7 +100,7 @@ struct StoryboardView: View {
         .padding(16)
         .background(
             RoundedRectangle(cornerRadius: 14, style: .continuous)
-                .fill(Color(nsColor: .controlBackgroundColor))
+                .fill(Color(nsColor: .windowBackgroundColor))
         )
     }
 
@@ -147,7 +147,7 @@ struct StoryboardView: View {
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .background(
                     RoundedRectangle(cornerRadius: 18, style: .continuous)
-                        .fill(Color(nsColor: .controlBackgroundColor))
+                        .fill(Color(nsColor: .windowBackgroundColor))
                         .shadow(color: .black.opacity(0.08), radius: 18, y: 8)
                 )
             } else {
@@ -243,7 +243,7 @@ struct StoryboardView: View {
         .frame(maxWidth: .infinity, minHeight: 180)
         .background(
             RoundedRectangle(cornerRadius: 14, style: .continuous)
-                .fill(Color(nsColor: .controlBackgroundColor))
+                .fill(Color(nsColor: .windowBackgroundColor))
         )
     }
 
@@ -314,7 +314,7 @@ private struct ShotReviewCard: View {
         .frame(maxWidth: .infinity, alignment: .leading)
         .background(
             RoundedRectangle(cornerRadius: 18, style: .continuous)
-                .fill(isSelected ? Color.accentColor.opacity(0.12) : Color(nsColor: .controlBackgroundColor))
+                .fill(isSelected ? Color.accentColor.opacity(0.12) : Color(nsColor: .windowBackgroundColor))
         )
         .overlay(
             RoundedRectangle(cornerRadius: 18, style: .continuous)

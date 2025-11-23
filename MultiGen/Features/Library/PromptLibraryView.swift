@@ -281,7 +281,7 @@ private struct PromptCard<Content: View>: View {
         .frame(maxWidth: .infinity, alignment: .leading)
         .background(
             RoundedRectangle(cornerRadius: 24, style: .continuous)
-                .fill(Color(nsColor: .controlBackgroundColor))
+                .fill(Color(nsColor: .windowBackgroundColor))
         )
     }
 }

@@ -53,7 +53,7 @@ struct ChatBubble: View {
         case .user:
             return Color.accentColor
         case .assistant:
-            return Color(nsColor: .controlBackgroundColor)
+            return Color(nsColor: .windowBackgroundColor)
         case .system:
             return Color.orange.opacity(0.2)
         }
@@ -125,13 +125,13 @@ struct ChatInputBar: View {
 
     var body: some View {
         HStack(spacing: 10) {
-            TextField("向 Gemini 描述你的需求…", text: $inputText, axis: .vertical)
+            TextField("向 AI 描述你的需求…", text: $inputText, axis: .vertical)
                 .textFieldStyle(.plain)
                 .padding(.vertical, 8)
                 .padding(.horizontal, 10)
                 .background(
                     RoundedRectangle(cornerRadius: 12, style: .continuous)
-                        .fill(Color(nsColor: .controlBackgroundColor))
+                        .fill(Color(nsColor: .windowBackgroundColor))
                 )
                 .focused($isTextFocused)
                 .disabled(isSending)
@@ -175,7 +175,7 @@ struct AIChatMessage: Identifiable {
         var displayName: String {
             switch self {
             case .user: return "我"
-            case .assistant: return "Gemini"
+            case .assistant: return "AI"
             case .system: return "系统"
             }
         }

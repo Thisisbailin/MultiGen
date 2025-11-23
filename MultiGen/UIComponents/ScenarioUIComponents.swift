@@ -50,7 +50,7 @@ struct SceneActionCard: View {
         .frame(maxWidth: .infinity, alignment: .leading)
         .background(
             RoundedRectangle(cornerRadius: 16, style: .continuous)
-                .fill(Color(nsColor: NSColor.controlBackgroundColor))
+                .fill(Color(nsColor: NSColor.windowBackgroundColor))
         )
         .overlay(
             RoundedRectangle(cornerRadius: 16, style: .continuous)

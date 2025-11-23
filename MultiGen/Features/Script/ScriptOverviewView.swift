@@ -56,7 +56,7 @@ struct ScriptOverviewView: View {
             ProjectInfoPanel(
                 store: store,
                 project: project,
-                accentColor: Color(nsColor: .controlBackgroundColor)
+                accentColor: Color(nsColor: .windowBackgroundColor)
             )
         } else {
             ProjectSelectionPlaceholder(
@@ -69,7 +69,7 @@ struct ScriptOverviewView: View {
     }
 }
 
-private let projectCardColor = Color(nsColor: .controlBackgroundColor)
+private let projectCardColor = Color(nsColor: .windowBackgroundColor)
 
 struct ProjectSelectionPlaceholder: View {
     let title: String
@@ -104,7 +104,7 @@ struct ProjectSelectionPlaceholder: View {
         .padding(40)
         .background(
             RoundedRectangle(cornerRadius: 20, style: .continuous)
-                .fill(Color(nsColor: .controlBackgroundColor))
+                .fill(Color(nsColor: .windowBackgroundColor))
         )
     }
 }
@@ -236,7 +236,7 @@ struct ProjectInfoPanel: View {
             .frame(maxWidth: .infinity, alignment: .leading)
             .background(
                 RoundedRectangle(cornerRadius: 24, style: .continuous)
-                    .fill(Color(nsColor: .controlBackgroundColor))
+                    .fill(Color(nsColor: .windowBackgroundColor))
             )
             .shadow(color: Color.black.opacity(0.08), radius: 18, y: 10)
     }
@@ -627,7 +627,7 @@ struct SceneCard: View {
         .padding(12)
         .background(
             RoundedRectangle(cornerRadius: 14)
-                .fill(Color(nsColor: .controlBackgroundColor))
+                .fill(Color(nsColor: .windowBackgroundColor))
         )
     }
 }

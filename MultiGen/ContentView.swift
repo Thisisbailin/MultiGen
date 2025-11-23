@@ -79,7 +79,7 @@ struct ContentView: View {
                             SettingsLink {
                                 Label("设置", systemImage: "slider.horizontal.3")
                             }
-                            .help("打开 Gemini 设置与密钥管理")
+                            .help("打开中转线路设置与模型管理")
                         }
                     }
                 }

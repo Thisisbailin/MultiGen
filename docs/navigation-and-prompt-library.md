@@ -18,7 +18,7 @@
 | 剧本 | 剧本助手 (`.script`) | 选中剧集的 Markdown（最多 6000 字）+ 项目元数据 | `ScriptView` 将当前剧集 ID 写入 `NavigationStore.currentScriptEpisodeID`。 |
 | 分镜 | 分镜助手 (`.storyboard`) | 剧本文本 + 当前场景正文（`sceneContext`）+ 现有分镜（前 12 镜） | `StoryboardView` 同步 episode/scene ID；若无分镜，仅携带剧本+场景上下文。 |
 
-> `sceneContext` 包含“场景标题/序号/摘要/正文”，正文会在 3000 字截断，确保 Gemini 按场景理解而非整集平均。AI 必须复用剧本里已有的场景名称，分镜不会生成新的场景层级。
+> `sceneContext` 包含“场景标题/序号/摘要/正文”，正文会在 3000 字截断，确保中转模型按场景理解而非整集平均。AI 必须复用剧本里已有的场景名称，分镜不会生成新的场景层级。
 > 智能协作一次只处理当前选中的场景；当用户切换场景时，Sidebar 会自动刷新上下文并要求 AI 仅输出该场景的镜头数组（不返回额外的 sceneTitle）。
 
 > 当页面未绑定自定义提示词时，系统会回退到主页聊天提示词，确保不会出现空引用。
@@ -36,7 +36,7 @@
 1. **提示词资料库**
    - 新增 `PromptLibraryStore` 持久化提示词。
    - 指令入口（侧边栏 → 资料库 → 指令）可查看/编辑提示词，保存后写入 `prompt-library.json`。
-   - 分镜 / 智能协作在调用 Gemini 前读取各自提示词（为空则不附加 system prompt）。
+   - 分镜 / 智能协作在调用中转模型前读取各自提示词（为空则不附加 system prompt）。
    - 分镜模块的默认 system prompt 现参考 `docs/Script_to_Storyboard_Advanced_Principles.md`，强调视觉母题、色彩脚本、空间语法、摄影机/光影/剪辑等专业原则，确保 AI 输出接近导演级分镜。
 
 2. **侧边栏与导航**

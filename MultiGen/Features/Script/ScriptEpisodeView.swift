@@ -40,7 +40,7 @@ struct ScriptEpisodeView: View {
                     .frame(maxWidth: .infinity, alignment: .leading)
                     .background(
                         RoundedRectangle(cornerRadius: 24, style: .continuous)
-                            .fill(Color(nsColor: .controlBackgroundColor))
+                            .fill(Color(nsColor: .windowBackgroundColor))
                     )
                     .shadow(color: Color.black.opacity(0.08), radius: 18, y: 10)
                 } else {
@@ -64,7 +64,7 @@ private struct EpisodePlaceholderView: View {
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .background(
             RoundedRectangle(cornerRadius: 20)
-                .fill(Color(nsColor: .controlBackgroundColor))
+                .fill(Color(nsColor: .windowBackgroundColor))
         )
     }
 }

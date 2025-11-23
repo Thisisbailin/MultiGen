@@ -84,24 +84,7 @@ struct StoryboardCollaborationView: View {
 }
 
 struct ImagingCollaborationView: View {
-    @EnvironmentObject private var imagingStore: ImagingStore
-
-    private var showingVideoPlaceholder: Bool {
-        imagingStore.selectedSegment == .video
-    }
-
     var body: some View {
         AIChatSidebarView(moduleOverride: .imaging)
-            .overlay(alignment: .center) {
-                if showingVideoPlaceholder {
-                    ModuleCollaborationHint(
-                        icon: "video.badge.exclamationmark",
-                        title: "视频工作流暂未开放",
-                        message: "当前影像助手提供风格/人物/场景/合成的图像生成功能，视频功能力保留为未来迭代。"
-                    )
-                    .padding()
-                    .allowsHitTesting(false)
-                }
-            }
     }
 }

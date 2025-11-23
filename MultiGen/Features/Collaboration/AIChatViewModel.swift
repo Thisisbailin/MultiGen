@@ -32,6 +32,7 @@ final class AIChatViewModel: ObservableObject {
     private var pendingSummaryMessageID: UUID?
     private var currentThreadKey: ChatThreadKey?
     private var isApplyingPendingThread = false
+    private var isApplyingStoryboardAutomation = false
     private var cancellables: Set<AnyCancellable> = []
 
     init(moduleOverride: AIChatModule?) {
@@ -126,6 +127,9 @@ final class AIChatViewModel: ObservableObject {
         let context = currentContext
         let module = coordinator.promptModule(for: context)
         let origin = originLabel(for: context)
+        if currentModule == .storyboard {
+            navigationStore.storyboardAutomationHandler?.recordSidebarInstruction(trimmed)
+        }
         guard let request = makeChatActionRequest(
             prompt: trimmed,
             context: context,
@@ -436,6 +440,7 @@ final class AIChatViewModel: ObservableObject {
             }
             if let result = outcome.result {
                 handleAIResponse(result: result, context: context, targetMessageID: placeholderID)
+                applyStoryboardAutomationIfNeeded(result: result, context: context)
             } else if let index = messages.firstIndex(where: { $0.id == placeholderID }) {
                 messages[index] = AIChatMessage(id: placeholderID, role: .assistant, text: outcome.collectedText)
             }
@@ -675,7 +680,24 @@ final class AIChatViewModel: ObservableObject {
             return "项目总结"
         }
     }
-    
+
+    private func applyStoryboardAutomationIfNeeded(result: AIActionResult, context: ChatContext) {
+        guard case .storyboard = context else { return }
+        guard let responseText = result.text?.trimmingCharacters(in: .whitespacesAndNewlines),
+              responseText.isEmpty == false else {
+            return
+        }
+        Task { @MainActor [weak self] in
+            guard let self else { return }
+            guard isApplyingStoryboardAutomation == false else { return }
+            guard let handler = self.navigationStore?.storyboardAutomationHandler else { return }
+            isApplyingStoryboardAutomation = true
+            let commandResult = handler.applySidebarAIResponse(responseText)
+            self.handleStoryboardResult(result, context: context, commandResult: commandResult)
+            isApplyingStoryboardAutomation = false
+        }
+    }
+
     private func refreshStoryboardAssistantState() {
         guard let coordinator = contextCoordinator else {
             storyboardAssistantState = .init(

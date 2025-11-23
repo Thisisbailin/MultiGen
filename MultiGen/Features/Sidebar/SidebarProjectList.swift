@@ -16,6 +16,7 @@ struct SidebarProjectList: View {
                 Label(item.title, systemImage: item.icon)
                     .tag(item)
             }
+
             Section("资料库") {
                 ForEach(SidebarItem.libraryItems) { item in
                     Label(item.title, systemImage: item.icon)

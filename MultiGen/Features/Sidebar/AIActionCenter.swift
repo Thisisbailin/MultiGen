@@ -34,8 +34,11 @@ struct AIActionResult {
     let request: AIActionRequest
     let text: String?
     let image: NSImage?
+    let imageBase64: String?
+    let imageURL: URL?
+    let videoURL: URL?
     let metadata: SceneJobResult.Metadata
-    let route: GeminiRoute
+    let route: AIRoute
 }
 
 enum AIActionStreamEvent {
@@ -73,6 +76,13 @@ final class AIActionCenter: ObservableObject {
         case .text:
             let route = dependencies.currentTextRoute()
             let result = try await dependencies.textService().submit(job: sceneRequest)
+            let renderedImage = Self.decodeImage(base64: result.imageBase64)
+            var textPayload = result.metadata.prompt
+            if let inlineURL = result.imageURL?.absoluteString {
+                textPayload += "\n\(inlineURL)"
+            } else if let base64 = result.imageBase64, base64.isEmpty == false {
+                textPayload += "\ndata:image/png;base64,\(base64)"
+            }
             await recordAudit(
                 jobID: sceneRequest.id,
                 kind: request.kind,
@@ -94,8 +104,11 @@ final class AIActionCenter: ObservableObject {
             )
             let resultPayload = AIActionResult(
                 request: request,
-                text: result.metadata.prompt,
-                image: nil,
+                text: textPayload,
+                image: renderedImage,
+                imageBase64: result.imageBase64,
+                imageURL: result.imageURL,
+                videoURL: result.videoURL,
                 metadata: result.metadata,
                 route: route
             )
@@ -126,10 +139,45 @@ final class AIActionCenter: ObservableObject {
                 request: request,
                 text: nil,
                 image: renderedImage,
+                imageBase64: result.imageBase64,
+                imageURL: result.imageURL,
+                videoURL: nil,
                 metadata: result.metadata,
                 route: route
             )
             logImageResult(resultPayload)
+            return resultPayload
+        case .video:
+            let route = dependencies.currentVideoRoute()
+            let result = try await dependencies.videoService().generateVideo(for: sceneRequest)
+            await recordAudit(
+                jobID: sceneRequest.id,
+                kind: request.kind,
+                jobAction: request.action,
+                route: route,
+                metadata: result.metadata,
+                assetRefs: request.assetReferences,
+                contextDescription: contextDescription,
+                origin: request.origin,
+                module: request.module
+            )
+            notifyIfNeeded(
+                route: route,
+                request: request,
+                channelLabel: "视频",
+                model: result.metadata.model
+            )
+            let resultPayload = AIActionResult(
+                request: request,
+                text: nil,
+                image: nil,
+                imageBase64: nil,
+                imageURL: result.videoURL,
+                videoURL: result.videoURL,
+                metadata: result.metadata,
+                route: route
+            )
+            logVideoResult(resultPayload)
             return resultPayload
         }
     }
@@ -204,6 +252,9 @@ final class AIActionCenter: ObservableObject {
                         request: request,
                         text: accumulated,
                         image: nil,
+                        imageBase64: nil,
+                        imageURL: nil,
+                        videoURL: nil,
                         metadata: metadata,
                         route: route
                     )
@@ -221,7 +272,7 @@ final class AIActionCenter: ObservableObject {
         jobID: UUID,
         kind: AIActionKind,
         jobAction: SceneAction,
-        route: GeminiRoute,
+        route: AIRoute,
         metadata: SceneJobResult.Metadata,
         assetRefs: [String],
         contextDescription: String,
@@ -248,7 +299,7 @@ final class AIActionCenter: ObservableObject {
         await dependencies.auditRepository.record(entry)
     }
 
-    private func notifyIfNeeded(route: GeminiRoute, request: AIActionRequest, channelLabel: String, model: String) {
+    private func notifyIfNeeded(route: AIRoute, request: AIActionRequest, channelLabel: String, model: String) {
         guard request.kind != .conversation else { return }
         let text = "\(request.origin) · \(channelLabel)（\(route.displayName) · \(model)）"
         appendSystemMessage(text)
@@ -283,13 +334,17 @@ final class AIActionCenter: ObservableObject {
 
     private func logRequest(request: AIActionRequest, sceneRequest: SceneJobRequest) {
         let route = request.channel == .text ? dependencies.currentTextRoute() : dependencies.currentImageRoute()
-        let modelLabel: String
-        switch request.channel {
-        case .text:
-            modelLabel = dependencies.currentTextModelLabel()
-        case .image:
-            modelLabel = dependencies.currentImageModelLabel()
-        }
+        let modelOverride = request.fields["__modelOverride"]
+        let modelLabel: String = {
+            switch request.channel {
+            case .text:
+                return modelOverride ?? dependencies.currentTextModelLabel()
+            case .image:
+                return dependencies.currentImageModelLabel()
+            case .video:
+                return dependencies.currentVideoModelLabel()
+            }
+        }()
         print(
             """
             [AIActionCenter] Request ->
@@ -320,5 +375,21 @@ final class AIActionCenter: ObservableObject {
             [AIActionCenter] Image result <- Route: \(result.route.displayName), Model: \(result.metadata.model)
             """
         )
+    }
+
+    private func logVideoResult(_ result: AIActionResult) {
+        print(
+            """
+            [AIActionCenter] Video result <- Route: \(result.route.displayName), Model: \(result.metadata.model), URL: \(result.videoURL?.absoluteString ?? "n/a")
+            """
+        )
+    }
+
+    private static func decodeImage(base64: String?) -> NSImage? {
+        guard let base64, base64.isEmpty == false,
+              let data = Data(base64Encoded: base64, options: .ignoreUnknownCharacters) else {
+            return nil
+        }
+        return NSImage(data: data)
     }
 }
