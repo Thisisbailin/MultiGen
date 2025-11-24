@@ -16,6 +16,24 @@ struct ChatBubble: View {
                     Text(message.text)
                         .font(.body)
                         .foregroundStyle(foregroundColor)
+                    if message.images.isEmpty == false {
+                        ScrollView(.horizontal, showsIndicators: false) {
+                            HStack(spacing: 10) {
+                                ForEach(message.images, id: \.self) { image in
+                                    Image(nsImage: image)
+                                        .resizable()
+                                        .scaledToFill()
+                                        .frame(width: 140, height: 140)
+                                        .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+                                        .overlay(
+                                            RoundedRectangle(cornerRadius: 12, style: .continuous)
+                                                .stroke(Color.secondary.opacity(0.2))
+                                        )
+                                }
+                            }
+                        }
+                        .frame(maxHeight: 160)
+                    }
                 }
                 if let detail = message.detail {
                     Button(action: onToggleDetail) {
@@ -115,7 +133,6 @@ struct ChatInputBar: View {
     @Binding var inputText: String
     let isSending: Bool
     let allowsAttachments: Bool
-    let attachmentCount: Int
     let canAddAttachments: Bool
     let onAddAttachment: () -> Void
     let onHistory: () -> Void
@@ -185,12 +202,14 @@ struct AIChatMessage: Identifiable {
     let role: Role
     let text: String
     let detail: String?
+    let images: [NSImage]
 
-    init(id: UUID = UUID(), role: Role, text: String, detail: String? = nil) {
+    init(id: UUID = UUID(), role: Role, text: String, detail: String? = nil, images: [NSImage] = []) {
         self.id = id
         self.role = role
         self.text = text
         self.detail = detail
+        self.images = images
     }
 }
 
@@ -200,7 +219,8 @@ extension AIChatMessage {
             id: record.id,
             role: record.role.asChatRole,
             text: record.text,
-            detail: record.detail
+            detail: record.detail,
+            images: []
         )
     }
 

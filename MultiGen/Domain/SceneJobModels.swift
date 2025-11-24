@@ -17,8 +17,6 @@ public enum SceneJobStatus: String, Codable, Sendable {
 
 public enum SceneJobChannel: String, Codable, Sendable {
     case text
-    case image
-    case video
 }
 
 public struct SceneJobRequest: Identifiable, Hashable, Codable, Sendable {

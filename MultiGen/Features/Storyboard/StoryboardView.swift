@@ -10,8 +10,12 @@ import SwiftUI
 struct StoryboardView: View {
     @EnvironmentObject private var navigationStore: NavigationStore
     @EnvironmentObject private var dependencies: AppDependencies
+    @EnvironmentObject private var actionCenter: AIActionCenter
+    @EnvironmentObject private var promptLibraryStore: PromptLibraryStore
     @StateObject private var store: StoryboardDialogueStore
     @State private var exportErrorMessage: String?
+    @State private var isGeneratingPrompts = false
+    @State private var promptError: String?
 
     init(store: StoryboardDialogueStore) {
         _store = StateObject(wrappedValue: store)
@@ -39,6 +43,14 @@ struct StoryboardView: View {
             Button("确定", role: .cancel) { store.errorMessage = nil }
         } message: {
             Text(store.errorMessage ?? "")
+        }
+        .alert("提示词生成失败", isPresented: Binding(
+            get: { promptError != nil },
+            set: { _ in promptError = nil }
+        )) {
+            Button("确定", role: .cancel) { promptError = nil }
+        } message: {
+            Text(promptError ?? "")
         }
         .alert("导出失败", isPresented: Binding(
             get: { exportErrorMessage != nil },
@@ -110,7 +122,7 @@ struct StoryboardView: View {
                 VStack(alignment: .leading, spacing: 12) {
                     HStack {
                         VStack(alignment: .leading, spacing: 4) {
-                            Text(scene.title)
+                            Text(scene.displayTitle)
                                 .font(.title2.bold())
                             Text(scene.countDescription)
                                 .font(.caption)
@@ -188,6 +200,13 @@ struct StoryboardView: View {
                 Label("导出", systemImage: "square.and.arrow.up")
             }
             .disabled(store.workspace == nil || store.entries.isEmpty)
+
+            Button {
+                Task { await generateShotPrompts() }
+            } label: {
+                Label("生成分镜提示词", systemImage: "sparkles")
+            }
+            .disabled(isGeneratingPrompts || store.entriesForSelectedScene.isEmpty)
         }
     }
 
@@ -224,7 +243,7 @@ struct StoryboardView: View {
         if let scene = store.currentScene {
             navigationStore.currentStoryboardSceneSnapshot = StoryboardSceneContextSnapshot(
                 id: scene.id,
-                title: scene.title,
+                title: scene.displayTitle,
                 order: scene.order,
                 summary: scene.summary,
                 body: scene.body
@@ -268,6 +287,100 @@ struct StoryboardView: View {
         } catch {
             exportErrorMessage = error.localizedDescription
         }
+    }
+
+    private func generateShotPrompts() async {
+        guard let scene = store.currentScene else {
+            promptError = "请选择场景后再生成提示词。"
+            return
+        }
+        let entries = scene.entries
+        guard entries.isEmpty == false else {
+            promptError = "当前场景暂无分镜。"
+            return
+        }
+        guard isGeneratingPrompts == false else { return }
+        isGeneratingPrompts = true
+        let systemPrompt = promptLibraryStore.document(for: .promptHelperStoryboard).content.trimmingCharacters(in: .whitespacesAndNewlines)
+        let prompt = makeShotPromptPayload(scene: scene, entries: entries)
+        var fields: [String: String] = ["prompt": prompt]
+        if systemPrompt.isEmpty == false {
+            fields["systemPrompt"] = systemPrompt
+        }
+        let request = AIActionRequest(
+            kind: .diagnostics,
+            action: .aiConsole,
+            channel: .text,
+            fields: fields,
+            assetReferences: [],
+            module: .promptHelperStoryboard,
+            context: .general,
+            contextSummaryOverride: "分镜提示词生成",
+            origin: "分镜提示词助手"
+        )
+        do {
+            let result = try await actionCenter.perform(request)
+            let text = result.text?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+            let prompts = parseShotPrompts(from: text)
+            if prompts.isEmpty {
+                promptError = "AI 未返回有效提示词。"
+            } else {
+                store.applyShotPrompts(sceneID: scene.id, prompts: prompts)
+            }
+        } catch {
+            promptError = "生成失败：\(error.localizedDescription)"
+        }
+        isGeneratingPrompts = false
+    }
+
+    private func makeShotPromptPayload(scene: StoryboardSceneViewModel, entries: [StoryboardEntry]) -> String {
+        var lines: [String] = []
+        lines.append("场景：\(scene.displayTitle)")
+        lines.append("请为以下分镜生成中文文生图提示词，返回 JSON：{\"prompts\":[{\"shotNumber\":1,\"prompt\":\"...\"}]}，只输出 JSON。")
+        for entry in entries {
+            var segments: [String] = []
+            segments.append("镜\(entry.fields.shotNumber)")
+            if entry.fields.shotScale.isEmpty == false { segments.append("景别：\(entry.fields.shotScale)") }
+            if entry.fields.cameraMovement.isEmpty == false { segments.append("运镜：\(entry.fields.cameraMovement)") }
+            if entry.fields.visualSummary.isEmpty == false {
+                segments.append("画面：\(entry.fields.visualSummary)")
+            } else if entry.sceneSummary.isEmpty == false {
+                segments.append("场景摘要：\(entry.sceneSummary)")
+            }
+            if entry.fields.dialogueOrOS.isEmpty == false { segments.append("台词/OS：\(entry.fields.dialogueOrOS)") }
+            if entry.fields.soundDesign.isEmpty == false { segments.append("声音：\(entry.fields.soundDesign)") }
+            lines.append(segments.joined(separator: " ｜ "))
+        }
+        return lines.joined(separator: "\n")
+    }
+
+    private func parseShotPrompts(from text: String) -> [Int: String] {
+        guard let json = extractJSON(from: text) else { return [:] }
+        struct Payload: Decodable {
+            struct Item: Decodable {
+                let shotNumber: Int
+                let prompt: String
+            }
+            let prompts: [Item]
+        }
+        if let data = json.data(using: .utf8),
+           let payload = try? JSONDecoder().decode(Payload.self, from: data) {
+            var result: [Int: String] = [:]
+            payload.prompts.forEach { item in
+                let trimmed = item.prompt.trimmingCharacters(in: .whitespacesAndNewlines)
+                if trimmed.isEmpty == false {
+                    result[item.shotNumber] = trimmed
+                }
+            }
+            return result
+        }
+        return [:]
+    }
+
+    private func extractJSON(from text: String) -> String? {
+        guard let start = text.firstIndex(of: "{"),
+              let end = text.lastIndex(of: "}") else { return nil }
+        return String(text[start...end])
     }
 }
 

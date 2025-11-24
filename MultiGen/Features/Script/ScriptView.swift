@@ -32,10 +32,17 @@ struct ScriptView: View {
     @State private var isImportingProject = false
 
     private let docxContentTypes: [UTType] = {
-        if let docx = UTType(filenameExtension: "docx") {
-            return [docx]
+        var types: [UTType] = []
+        if let docx = UTType(filenameExtension: "docx") { types.append(docx) }
+        if let doc = UTType(filenameExtension: "doc") { types.append(doc) }
+        if let pages = UTType(filenameExtension: "pages") { types.append(pages) }
+        if let mw = UTType("com.microsoft.word.doc") {
+            types.append(mw)
         }
-        return [.data]
+        if let mwx = UTType("org.openxmlformats.wordprocessingml.document") {
+            types.append(mwx)
+        }
+        return types
     }()
 
     private var projects: [ScriptProject] {
@@ -69,29 +76,17 @@ struct ScriptView: View {
         contentView
         .animation(.easeInOut(duration: 0.2), value: selectedProjectID)
         .onAppear {
-            if selectedProjectID == nil {
-                if let savedProject = navigationStore.currentScriptProjectID,
-                   projects.contains(where: { $0.id == savedProject }) {
-                    selectedProjectID = savedProject
-                } else {
-                    selectedProjectID = projects.first?.id
-                }
+            if selectedProjectID == nil, selectedEpisodeID == nil,
+               let savedEpisode = navigationStore.currentScriptEpisodeID,
+               let project = projects.first(where: { $0.episodes.contains(where: { $0.id == savedEpisode }) }) {
+                selectedProjectID = project.id
+                selectedEpisodeID = savedEpisode
             }
-            if selectedEpisodeID == nil {
-                if
-                    let savedEpisode = navigationStore.currentScriptEpisodeID,
-                    let project = selectedProject,
-                    project.episodes.contains(where: { $0.id == savedEpisode })
-                {
-                    selectedEpisodeID = savedEpisode
-                } else {
-                    selectedEpisodeID = selectedProject?.orderedEpisodes.first?.id
-                }
-            }
+
             navigationStore.currentScriptProjectID = selectedProjectID
             navigationStore.currentScriptEpisodeID = selectedEpisodeID
             if highlightedProjectID == nil {
-                highlightedProjectID = selectedProjectID ?? projects.first?.id
+                highlightedProjectID = navigationStore.currentScriptProjectID ?? projects.first?.id
             }
         }
         .onChange(of: selectedEpisodeID) { _, newValue in
@@ -418,17 +413,33 @@ struct ScriptView: View {
             }
             do {
                 let importer = ScriptDocxImporter()
-                let items = try importer.parseDocument(at: url)
-                guard items.isEmpty == false else {
+                let payload = try importer.parseDocument(at: url)
+                guard payload.episodes.isEmpty == false else {
                     importErrorMessage = "未在文档中找到“第X集”标记，请检查格式。"
                     return
                 }
                 let projectName = url.deletingPathExtension().lastPathComponent
-                let project = store.addProject(title: projectName, synopsis: "", type: items.count > 1 ? .episodic : .standalone)
-                for item in items {
-                    if let episode = store.addEpisode(to: project.id, number: item.episodeNumber, title: item.title, markdown: item.body) {
-                        store.updateEpisode(projectID: project.id, episodeID: episode.id) { editable in
-                            editable.scenes = [
+                let project = store.addProject(
+                    title: projectName,
+                    synopsis: payload.synopsis,
+                    type: payload.episodes.count > 1 ? .episodic : .standalone,
+                    mainCharacters: payload.characters,
+                    outlines: payload.outlines
+                )
+                for item in payload.episodes {
+                    let episodeMarkdown: String
+                    if item.scenes.isEmpty {
+                        episodeMarkdown = item.body
+                    } else {
+                        episodeMarkdown = item.scenes
+                            .map { $0.body }
+                            .joined(separator: "\n\n")
+                    }
+
+                    if let episode = store.addEpisode(to: project.id, number: item.episodeNumber, title: item.title, markdown: episodeMarkdown) {
+                        let scenes: [ScriptScene]
+                        if item.scenes.isEmpty {
+                            scenes = [
                                 ScriptScene(
                                     order: 1,
                                     title: "未命名场景",
@@ -436,6 +447,20 @@ struct ScriptView: View {
                                     body: item.body
                                 )
                             ]
+                        } else {
+                            scenes = item.scenes.map { scene in
+                                ScriptScene(
+                                    order: scene.index,
+                                    title: scene.title,
+                                    summary: "",
+                                    body: scene.body,
+                                    locationHint: scene.locationHint,
+                                    timeHint: scene.timeHint
+                                )
+                            }
+                        }
+                        store.updateEpisode(projectID: project.id, episodeID: episode.id) { editable in
+                            editable.scenes = scenes
                         }
                     }
                 }

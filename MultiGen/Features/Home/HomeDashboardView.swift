@@ -2,9 +2,7 @@ import SwiftUI
 
 struct HomeDashboardView: View {
     let textModelLabel: String
-    let imageModelLabel: String
     let textRouteLabel: String
-    let imageRouteLabel: String
 
     private let workflowStages: [HomeWorkflowStage] = [
         HomeWorkflowStage(
@@ -18,18 +16,6 @@ struct HomeDashboardView: View {
             detail: "分镜模块将剧本转译为镜头表，智能协同可直接操作更新。",
             focus: "应用深入介入",
             isActive: true
-        ),
-        HomeWorkflowStage(
-            title: "AIGC 图像 · Imaging (Nano Banana)",
-            detail: "影像模块正在重构，现阶段提供图像风格/MVP 生图能力。",
-            focus: "当前重点迭代",
-            isActive: true
-        ),
-        HomeWorkflowStage(
-            title: "AIGC 影像 · Future (Sora)",
-            detail: "未来阶段会将图像资产升级为视频生成工作流。",
-            focus: "规划中",
-            isActive: false
         )
     ]
 
@@ -49,7 +35,7 @@ struct HomeDashboardView: View {
         VStack(alignment: .leading, spacing: 12) {
             Text("MultiGen · macOS 专用 AIGC 创作台")
                 .font(.title.bold())
-            Text("当前聚焦剧本 → 分镜 → 影像三段式流程，智能协同模块作为 AI 中枢负责统一路由、审计与回执。")
+            Text("当前聚焦剧本 → 分镜两段式流程，智能协同模块作为 AI 中枢负责统一路由、审计与回执。")
                 .font(.callout)
                 .foregroundStyle(.secondary)
 
@@ -57,10 +43,6 @@ struct HomeDashboardView: View {
                 GridRow {
                     HomeMetricCard(title: "文本模型", value: textModelLabel)
                     HomeMetricCard(title: "文本路线", value: textRouteLabel)
-                }
-                GridRow {
-                    HomeMetricCard(title: "图像模型", value: imageModelLabel)
-                    HomeMetricCard(title: "图像路线", value: imageRouteLabel)
                 }
             }
         }

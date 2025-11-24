@@ -8,7 +8,6 @@ struct AIChatSidebarView: View {
     @EnvironmentObject private var navigationStore: NavigationStore
     @EnvironmentObject private var scriptStore: ScriptStore
     @EnvironmentObject private var storyboardStore: StoryboardStore
-    @EnvironmentObject private var imagingStore: ImagingStore
 
     @StateObject private var viewModel: AIChatViewModel
     @State private var expandedMessageIDs: Set<UUID> = []
@@ -23,7 +22,6 @@ struct AIChatSidebarView: View {
                 module: viewModel.currentModule,
                 scriptProjectTitle: viewModel.scriptProjectTitle,
                 storyboardState: viewModel.storyboardAssistantState,
-                attachmentCount: viewModel.attachmentCount,
                 onRequestSummary: viewModel.scriptProjectTitle == nil ? nil : { viewModel.requestProjectSummaryFromPanel() },
                 onShowHistory: {
                     navigationStore.sidebarMode = .ai
@@ -56,8 +54,7 @@ struct AIChatSidebarView: View {
                 promptLibraryStore: promptLibraryStore,
                 navigationStore: navigationStore,
                 scriptStore: scriptStore,
-                storyboardStore: storyboardStore,
-                imagingStore: imagingStore
+                storyboardStore: storyboardStore
             )
         }
         .sheet(isPresented: historySheetBinding) {
@@ -98,12 +95,6 @@ struct AIChatSidebarView: View {
             navigationStore.currentStoryboardEpisodeID = nil
             navigationStore.currentStoryboardSceneID = nil
             navigationStore.currentStoryboardSceneSnapshot = nil
-        case .image:
-            navigationStore.selection = .image
-            navigationStore.currentScriptEpisodeID = nil
-            navigationStore.currentStoryboardEpisodeID = nil
-            navigationStore.currentStoryboardSceneID = nil
-            navigationStore.currentStoryboardSceneSnapshot = nil
         case .scriptEpisode(let episodeID):
             navigationStore.currentScriptEpisodeID = episodeID
             navigationStore.selection = .script
@@ -121,6 +112,32 @@ struct AIChatSidebarView: View {
             navigationStore.currentStoryboardEpisodeID = nil
             navigationStore.currentStoryboardSceneID = nil
             navigationStore.currentStoryboardSceneSnapshot = nil
+        case .promptHelper(let projectID, let targetID):
+            navigationStore.currentScriptProjectID = projectID
+            navigationStore.currentStoryboardEpisodeID = nil
+            navigationStore.currentStoryboardSceneID = nil
+            navigationStore.currentStoryboardSceneSnapshot = nil
+            if let project = scriptStore.projects.first(where: { $0.id == projectID }) {
+                navigationStore.currentScriptEpisodeID = project.episodes.first?.id
+                if project.mainCharacters.contains(where: { $0.id == targetID }) {
+                    navigationStore.selection = .libraryCharacters
+                    navigationStore.currentLibraryCharacterID = targetID
+                    navigationStore.currentLibrarySceneID = nil
+                } else if project.keyScenes.contains(where: { $0.id == targetID }) {
+                    navigationStore.selection = .libraryScenes
+                    navigationStore.currentLibrarySceneID = targetID
+                    navigationStore.currentLibraryCharacterID = nil
+                } else {
+                    navigationStore.selection = .libraryPrompts
+                    navigationStore.currentLibraryCharacterID = nil
+                    navigationStore.currentLibrarySceneID = nil
+                }
+            } else {
+                navigationStore.selection = .libraryPrompts
+                navigationStore.currentScriptEpisodeID = nil
+                navigationStore.currentLibraryCharacterID = nil
+                navigationStore.currentLibrarySceneID = nil
+            }
         case .storyboard(let targetID):
             if let match = findStoryboardContext(for: targetID) {
                 navigationStore.currentStoryboardEpisodeID = match.episodeID
@@ -178,19 +195,18 @@ struct AIChatSidebarView: View {
     }
 
     private var inputComposer: some View {
-        ChatInputBar(
-            inputText: Binding(
-                get: { viewModel.inputText },
-                set: { viewModel.inputText = $0 }
-            ),
-            isSending: viewModel.isSending,
-            allowsAttachments: viewModel.currentModule.allowsAttachments,
-            attachmentCount: viewModel.attachmentCount,
-            canAddAttachments: viewModel.canAddAttachments,
-            onAddAttachment: viewModel.addAttachment,
-            onHistory: {
-                navigationStore.sidebarMode = .ai
-                navigationStore.isShowingConversationHistory = true
+            ChatInputBar(
+                inputText: Binding(
+                    get: { viewModel.inputText },
+                    set: { viewModel.inputText = $0 }
+                ),
+                isSending: viewModel.isSending,
+                allowsAttachments: viewModel.currentModule.allowsAttachments,
+                canAddAttachments: viewModel.canAddAttachments,
+                onAddAttachment: viewModel.addAttachment,
+                onHistory: {
+                    navigationStore.sidebarMode = .ai
+                    navigationStore.isShowingConversationHistory = true
             },
             onSend: viewModel.sendMessage
         )

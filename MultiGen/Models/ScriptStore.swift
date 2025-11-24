@@ -7,6 +7,7 @@
 
 import Foundation
 import Combine
+import SwiftUI
 
 struct ScriptScene: Identifiable, Codable, Hashable {
     let id: UUID
@@ -102,11 +103,55 @@ struct ProjectCharacterProfile: Identifiable, Codable, Hashable {
     let id: UUID
     var name: String
     var description: String
+    var prompt: String
+    var imageData: Data?
+    var variants: [CharacterVariant]
 
-    init(id: UUID = UUID(), name: String = "", description: String = "") {
+    init(
+        id: UUID = UUID(),
+        name: String = "",
+        description: String = "",
+        prompt: String = "",
+        imageData: Data? = nil,
+        variants: [CharacterVariant] = []
+    ) {
         self.id = id
         self.name = name
         self.description = description
+        self.prompt = prompt
+        self.imageData = imageData
+        self.variants = variants
+    }
+
+    enum CodingKeys: String, CodingKey {
+        case id, name, description, prompt, imageData, variants
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        id = try container.decode(UUID.self, forKey: .id)
+        name = try container.decodeIfPresent(String.self, forKey: .name) ?? ""
+        description = try container.decodeIfPresent(String.self, forKey: .description) ?? ""
+        prompt = try container.decodeIfPresent(String.self, forKey: .prompt) ?? ""
+        imageData = try container.decodeIfPresent(Data.self, forKey: .imageData)
+        variants = try container.decodeIfPresent([CharacterVariant].self, forKey: .variants) ?? []
+    }
+
+    var primaryImageData: Data? {
+        if let cover = variants.first(where: { $0.coverImageData != nil })?.coverImageData {
+            return cover
+        }
+        return imageData
+    }
+
+    func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(id, forKey: .id)
+        try container.encode(name, forKey: .name)
+        try container.encode(description, forKey: .description)
+        try container.encode(prompt, forKey: .prompt)
+        try container.encodeIfPresent(imageData, forKey: .imageData)
+        try container.encode(variants, forKey: .variants)
     }
 }
 
@@ -114,11 +159,146 @@ struct ProjectSceneProfile: Identifiable, Codable, Hashable {
     let id: UUID
     var name: String
     var description: String
+    var prompt: String
+    var imageData: Data?
+    var variants: [SceneVariant]
 
-    init(id: UUID = UUID(), name: String = "", description: String = "") {
+    init(
+        id: UUID = UUID(),
+        name: String = "",
+        description: String = "",
+        prompt: String = "",
+        imageData: Data? = nil,
+        variants: [SceneVariant] = []
+    ) {
         self.id = id
         self.name = name
         self.description = description
+        self.prompt = prompt
+        self.imageData = imageData
+        self.variants = variants
+    }
+
+    enum CodingKeys: String, CodingKey {
+        case id, name, description, prompt, imageData, variants
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        id = try container.decode(UUID.self, forKey: .id)
+        name = try container.decodeIfPresent(String.self, forKey: .name) ?? ""
+        description = try container.decodeIfPresent(String.self, forKey: .description) ?? ""
+        prompt = try container.decodeIfPresent(String.self, forKey: .prompt) ?? ""
+        imageData = try container.decodeIfPresent(Data.self, forKey: .imageData)
+        variants = try container.decodeIfPresent([SceneVariant].self, forKey: .variants) ?? []
+    }
+
+    var primaryImageData: Data? {
+        if let cover = variants.first(where: { $0.coverImageData != nil })?.coverImageData {
+            return cover
+        }
+        return imageData
+    }
+
+    func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(id, forKey: .id)
+        try container.encode(name, forKey: .name)
+        try container.encode(description, forKey: .description)
+        try container.encode(prompt, forKey: .prompt)
+        try container.encodeIfPresent(imageData, forKey: .imageData)
+        try container.encode(variants, forKey: .variants)
+    }
+}
+
+struct CharacterVariant: Identifiable, Codable, Hashable {
+    let id: UUID
+    var label: String
+    var promptOverride: String
+    var images: [CharacterImage]
+
+    init(
+        id: UUID = UUID(),
+        label: String = "默认形态",
+        promptOverride: String = "",
+        images: [CharacterImage] = []
+    ) {
+        self.id = id
+        self.label = label
+        self.promptOverride = promptOverride
+        self.images = images
+    }
+
+    var coverImageData: Data? {
+        images.first(where: { $0.isCover })?.data ?? images.first?.data
+    }
+}
+
+struct CharacterImage: Identifiable, Codable, Hashable {
+    let id: UUID
+    var data: Data?
+    var isCover: Bool
+    
+    init(id: UUID = UUID(), data: Data? = nil, isCover: Bool = false) {
+        self.id = id
+        self.data = data
+        self.isCover = isCover
+    }
+
+}
+
+struct SceneVariant: Identifiable, Codable, Hashable {
+    let id: UUID
+    var label: String
+    var promptOverride: String
+    var images: [SceneImage]
+
+    init(
+        id: UUID = UUID(),
+        label: String = "默认视角",
+        promptOverride: String = "",
+        images: [SceneImage] = []
+    ) {
+        self.id = id
+        self.label = label
+        self.promptOverride = promptOverride
+        self.images = images
+    }
+
+    var coverImageData: Data? {
+        images.first(where: { $0.isCover })?.data ?? images.first?.data
+    }
+}
+
+struct SceneImage: Identifiable, Codable, Hashable {
+    let id: UUID
+    var data: Data?
+    var isCover: Bool
+    
+    init(id: UUID = UUID(), data: Data? = nil, isCover: Bool = false) {
+        self.id = id
+        self.data = data
+        self.isCover = isCover
+    }
+
+}
+
+struct EpisodeOutline: Identifiable, Codable, Hashable {
+    let id: UUID
+    var episodeNumber: Int
+    var title: String
+    var summary: String
+
+    init(
+        id: UUID = UUID(),
+        episodeNumber: Int,
+        title: String,
+        summary: String
+    ) {
+        self.id = id
+        self.episodeNumber = episodeNumber
+        self.title = title
+        self.summary = summary
     }
 }
 
@@ -147,6 +327,7 @@ struct ScriptProject: Identifiable, Codable, Hashable {
     var notes: String
     var mainCharacters: [ProjectCharacterProfile]
     var keyScenes: [ProjectSceneProfile]
+    var episodeOutlines: [EpisodeOutline]
     var createdAt: Date
     var updatedAt: Date
     var episodes: [ScriptEpisode]
@@ -162,6 +343,7 @@ struct ScriptProject: Identifiable, Codable, Hashable {
         notes: String = "",
         mainCharacters: [ProjectCharacterProfile] = [],
         keyScenes: [ProjectSceneProfile] = [],
+        episodeOutlines: [EpisodeOutline] = [],
         createdAt: Date = .now,
         updatedAt: Date = .now,
         episodes: [ScriptEpisode] = []
@@ -176,13 +358,14 @@ struct ScriptProject: Identifiable, Codable, Hashable {
         self.notes = notes
         self.mainCharacters = mainCharacters
         self.keyScenes = keyScenes
+        self.episodeOutlines = episodeOutlines
         self.createdAt = createdAt
         self.updatedAt = updatedAt
         self.episodes = episodes
     }
 
     enum CodingKeys: String, CodingKey {
-        case id, title, synopsis, tags, type, productionStartDate, productionEndDate, notes, mainCharacters, keyScenes, createdAt, updatedAt, episodes
+        case id, title, synopsis, tags, type, productionStartDate, productionEndDate, notes, mainCharacters, keyScenes, episodeOutlines, createdAt, updatedAt, episodes
     }
 
     init(from decoder: Decoder) throws {
@@ -197,6 +380,7 @@ struct ScriptProject: Identifiable, Codable, Hashable {
         notes = try container.decodeIfPresent(String.self, forKey: .notes) ?? ""
         mainCharacters = try container.decodeIfPresent([ProjectCharacterProfile].self, forKey: .mainCharacters) ?? []
         keyScenes = try container.decodeIfPresent([ProjectSceneProfile].self, forKey: .keyScenes) ?? []
+        episodeOutlines = try container.decodeIfPresent([EpisodeOutline].self, forKey: .episodeOutlines) ?? []
         createdAt = try container.decode(Date.self, forKey: .createdAt)
         updatedAt = try container.decode(Date.self, forKey: .updatedAt)
         episodes = try container.decodeIfPresent([ScriptEpisode].self, forKey: .episodes) ?? []
@@ -247,6 +431,7 @@ final class ScriptStore: ObservableObject {
             for idx in copy.episodes.indices {
                 normalizeScenes(in: &copy.episodes[idx])
             }
+            normalizeAssets(in: &copy)
             return copy
         }
         rebuildEpisodesCache()
@@ -255,13 +440,17 @@ final class ScriptStore: ObservableObject {
     func addProject(
         title: String,
         synopsis: String,
-        type: ScriptProject.ProjectType
+        type: ScriptProject.ProjectType,
+        mainCharacters: [ProjectCharacterProfile] = [],
+        outlines: [EpisodeOutline] = []
     ) -> ScriptProject {
         var project = ScriptProject(
             title: title.isEmpty ? "未命名项目" : title,
             synopsis: synopsis,
             tags: [],
-            type: type
+            type: type,
+            mainCharacters: mainCharacters,
+            episodeOutlines: outlines
         )
         if project.episodes.isEmpty {
             project.episodes = [
@@ -287,9 +476,24 @@ final class ScriptStore: ObservableObject {
     func updateProject(id: UUID, update: (inout ScriptProject) -> Void) {
         guard let index = projects.firstIndex(where: { $0.id == id }) else { return }
         update(&projects[index])
+        normalizeAssets(in: &projects[index])
         projects[index].updatedAt = .now
         persist()
         rebuildEpisodesCache()
+    }
+
+    func reorderCharacters(projectID: UUID, source: IndexSet, destination: Int) {
+        guard let index = projects.firstIndex(where: { $0.id == projectID }) else { return }
+        projects[index].mainCharacters.move(fromOffsets: source, toOffset: destination)
+        projects[index].updatedAt = .now
+        persist()
+    }
+
+    func reorderScenes(projectID: UUID, source: IndexSet, destination: Int) {
+        guard let index = projects.firstIndex(where: { $0.id == projectID }) else { return }
+        projects[index].keyScenes.move(fromOffsets: source, toOffset: destination)
+        projects[index].updatedAt = .now
+        persist()
     }
 
     func addEpisode(
@@ -478,6 +682,79 @@ final class ScriptStore: ObservableObject {
             .sorted { $0.order < $1.order }
             .map { $0.body }
             .joined(separator: "\n\n")
+    }
+
+    private func normalizeAssets(in project: inout ScriptProject) {
+        for idx in project.mainCharacters.indices {
+            project.mainCharacters[idx].variants = normalizeCharacterVariants(
+                variants: project.mainCharacters[idx].variants,
+                fallbackImage: project.mainCharacters[idx].imageData
+            )
+        }
+        for idx in project.keyScenes.indices {
+            project.keyScenes[idx].variants = normalizeSceneVariants(
+                variants: project.keyScenes[idx].variants,
+                fallbackImage: project.keyScenes[idx].imageData
+            )
+        }
+    }
+
+    private func normalizeCharacterVariants(variants: [CharacterVariant], fallbackImage: Data?) -> [CharacterVariant] {
+        if variants.isEmpty {
+            var variant = CharacterVariant(label: "默认形态", promptOverride: "", images: [])
+            if let fallbackImage {
+                variant.images = [CharacterImage(data: fallbackImage, isCover: true)]
+            }
+            return [variant]
+        }
+        return variants.map { variant in
+            var copy = variant
+            if copy.images.isEmpty, let fallbackImage {
+                copy.images = [CharacterImage(data: fallbackImage, isCover: true)]
+            } else {
+                copy.images = ensureCoverFlag(copy.images)
+            }
+            return copy
+        }
+    }
+
+    private func normalizeSceneVariants(variants: [SceneVariant], fallbackImage: Data?) -> [SceneVariant] {
+        if variants.isEmpty {
+            var variant = SceneVariant(label: "默认视角", promptOverride: "", images: [])
+            if let fallbackImage {
+                variant.images = [SceneImage(data: fallbackImage, isCover: true)]
+            }
+            return [variant]
+        }
+        return variants.map { variant in
+            var copy = variant
+            if copy.images.isEmpty, let fallbackImage {
+                copy.images = [SceneImage(data: fallbackImage, isCover: true)]
+            } else {
+                copy.images = ensureCoverFlag(copy.images)
+            }
+            return copy
+        }
+    }
+
+    private func ensureCoverFlag<T: VariantImageRepresentable>(_ images: [T]) -> [T] {
+        guard images.isEmpty == false else { return images }
+        var updated = images
+        if updated.contains(where: { $0.isCover }) == false {
+            updated[0].isCover = true
+        } else {
+            var firstCoverSet = false
+            for idx in updated.indices {
+                if updated[idx].isCover {
+                    if firstCoverSet {
+                        updated[idx].isCover = false
+                    } else {
+                        firstCoverSet = true
+                    }
+                }
+            }
+        }
+        return updated
     }
 }
 

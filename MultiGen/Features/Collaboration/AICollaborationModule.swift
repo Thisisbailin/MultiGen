@@ -9,8 +9,10 @@ struct AICollaborationModule: View {
             ScriptCollaborationView()
         case .storyboard:
             StoryboardCollaborationView()
-        case .imaging:
-            ImagingCollaborationView()
+        case .promptHelperStyle:
+            PromptHelperCollaborationView()
+        case .promptHelper:
+            PromptHelperCollaborationView()
         case .general:
             GeneralCollaborationView()
         }
@@ -22,8 +24,8 @@ struct AICollaborationModule: View {
             return .script
         case .storyboard:
             return .storyboard
-        case .image:
-            return .imaging
+        case .libraryStyles, .libraryCharacters, .libraryScenes, .libraryPrompts:
+            return .promptHelper
         default:
             return .general
         }
@@ -59,6 +61,32 @@ struct ScriptCollaborationView: View {
     }
 }
 
+struct PromptHelperCollaborationView: View {
+    @EnvironmentObject private var navigationStore: NavigationStore
+    @EnvironmentObject private var scriptStore: ScriptStore
+
+    private var hasProject: Bool {
+        navigationStore.currentScriptProjectID.flatMap { id in
+            scriptStore.projects.first(where: { $0.id == id })
+        } != nil
+    }
+
+    var body: some View {
+        AIChatSidebarView(moduleOverride: .promptHelper)
+            .overlay(alignment: .center) {
+                if hasProject == false {
+                    ModuleCollaborationHint(
+                        icon: "sparkles.rectangle.stack",
+                        title: "请选择项目",
+                        message: "在角色/场景/指令模块中选择项目后，提示词助手才能读取剧本文本生成形象设计提示词。"
+                    )
+                    .padding()
+                    .allowsHitTesting(false)
+                }
+            }
+    }
+}
+
 struct StoryboardCollaborationView: View {
     @EnvironmentObject private var navigationStore: NavigationStore
 
@@ -80,11 +108,5 @@ struct StoryboardCollaborationView: View {
                     .allowsHitTesting(false)
                 }
             }
-    }
-}
-
-struct ImagingCollaborationView: View {
-    var body: some View {
-        AIChatSidebarView(moduleOverride: .imaging)
     }
 }

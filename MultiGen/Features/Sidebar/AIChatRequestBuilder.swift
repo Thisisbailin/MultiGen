@@ -151,17 +151,21 @@ struct AIChatRequestBuilder {
         var lines: [String] = []
         lines.append("项目：\(project.title)")
         lines.append("类型：\(project.type.displayName)")
-        if project.tags.isEmpty == false {
-            lines.append("标签：\(project.tags.joined(separator: "｜"))")
-        }
-        if let start = project.productionStartDate {
-            lines.append("制作起始：\(start.formatted(date: .abbreviated, time: .omitted))")
-        }
-        if let end = project.productionEndDate {
-            lines.append("制作结束：\(end.formatted(date: .abbreviated, time: .omitted))")
-        }
-        if project.synopsis.isEmpty == false {
-            lines.append("简介：\(project.synopsis)")
+        lines.append("")
+        lines.append("剧本文本（按集与场景顺序）：")
+        for episode in project.orderedEpisodes {
+            let episodeTitle = episode.title.trimmingCharacters(in: .whitespacesAndNewlines)
+            let episodeHeader = episodeTitle.isEmpty ? "第\(episode.episodeNumber)集" : "第\(episode.episodeNumber)集 · \(episodeTitle)"
+            lines.append(episodeHeader)
+            let scenes = episode.scenes.sorted { $0.order < $1.order }
+            for scene in scenes {
+                let extras = [scene.locationHint, scene.timeHint].filter { $0.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty == false }
+                let header = extras.isEmpty ? scene.title : ([scene.title] + extras).joined(separator: " · ")
+                lines.append("场景\(scene.order)：\(header)")
+                let body = scene.body.trimmingCharacters(in: .whitespacesAndNewlines)
+                lines.append(body.isEmpty ? "（无正文）" : body)
+            }
+            lines.append("") // blank between episodes
         }
         return lines.joined(separator: "\n")
     }

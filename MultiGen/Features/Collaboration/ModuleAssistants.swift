@@ -4,7 +4,6 @@ struct ModuleAssistantSwitcher: View {
     let module: AIChatModule
     let scriptProjectTitle: String?
     let storyboardState: StoryboardAssistantDisplay?
-    let attachmentCount: Int
     let onRequestSummary: (() -> Void)?
     let onShowHistory: () -> Void
     let onStoryboardGenerate: (() -> Void)?
@@ -38,24 +37,36 @@ struct ModuleAssistantSwitcher: View {
                 }
             }
             .assistantBackground()
+        case .promptHelper, .promptHelperStyle:
+            VStack(alignment: .leading, spacing: 8) {
+                Text(module == .promptHelperStyle ? "风格助手" : "提示词助手")
+                    .font(.headline)
+                if module == .promptHelperStyle {
+                    Text("上传风格参考图，生成可复用的风格提示词。")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                } else {
+                    Text(scriptProjectTitle.map { "当前项目：\($0)" } ?? "请在角色/场景模块选择项目")
+                        .foregroundStyle(.secondary)
+                    Text("根据角色/场景描述生成中文提示词。")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+                HStack(spacing: 12) {
+                    Button {
+                        onShowHistory()
+                    } label: {
+                        Label("查看历史", systemImage: "clock.arrow.circlepath")
+                    }
+                    .buttonStyle(.bordered)
+                }
+            }
+            .assistantBackground()
         case .storyboard:
             StoryboardAssistantCard(
                 state: storyboardState,
                 onGenerate: onStoryboardGenerate
             )
-        case .imaging:
-            VStack(alignment: .leading, spacing: 8) {
-                Text("影像助手")
-                    .font(.headline)
-                Text("在此输入提示词并附加图片（最多 3 张），结果会同步到影像模块。")
-                    .foregroundStyle(.secondary)
-                Text("已附加图片：\(attachmentCount)")
-                    .font(.footnote)
-                    .foregroundStyle(.secondary)
-                Button("查看历史", action: onShowHistory)
-                    .buttonStyle(.bordered)
-            }
-            .assistantBackground()
         }
     }
 

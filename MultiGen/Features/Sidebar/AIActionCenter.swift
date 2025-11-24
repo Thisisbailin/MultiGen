@@ -14,7 +14,6 @@ enum AIActionKind {
     case storyboardOperation
     case projectSummary
     case sceneComposer
-    case imaging
     case diagnostics
 }
 
@@ -72,127 +71,52 @@ final class AIActionCenter: ObservableObject {
         )
         logRequest(request: request, sceneRequest: sceneRequest)
 
-        switch request.channel {
-        case .text:
-            let route = dependencies.currentTextRoute()
-            let result = try await dependencies.textService().submit(job: sceneRequest)
-            let renderedImage = Self.decodeImage(base64: result.imageBase64)
-            var textPayload = result.metadata.prompt
-            if let inlineURL = result.imageURL?.absoluteString {
-                textPayload += "\n\(inlineURL)"
-            } else if let base64 = result.imageBase64, base64.isEmpty == false {
-                textPayload += "\ndata:image/png;base64,\(base64)"
-            }
-            await recordAudit(
-                jobID: sceneRequest.id,
-                kind: request.kind,
-                jobAction: request.action,
-                route: route,
-                metadata: result.metadata,
-                assetRefs: request.assetReferences,
-                contextDescription: contextDescription,
-                origin: request.origin,
-                module: request.module
-            )
-            if case .storyboardOperation = request.kind {
-            }
-            notifyIfNeeded(
-                route: route,
-                request: request,
-                channelLabel: "文本",
-                model: result.metadata.model
-            )
-            let resultPayload = AIActionResult(
-                request: request,
-                text: textPayload,
-                image: renderedImage,
-                imageBase64: result.imageBase64,
-                imageURL: result.imageURL,
-                videoURL: result.videoURL,
-                metadata: result.metadata,
-                route: route
-            )
-            logTextResult(resultPayload)
-            return resultPayload
-        case .image:
-            let route = dependencies.currentImageRoute()
-            let result = try await dependencies.imageService().generateImage(for: sceneRequest)
-            await recordAudit(
-                jobID: sceneRequest.id,
-                kind: request.kind,
-                jobAction: request.action,
-                route: route,
-                metadata: result.metadata,
-                assetRefs: request.assetReferences,
-                contextDescription: contextDescription,
-                origin: request.origin,
-                module: request.module
-            )
-            notifyIfNeeded(
-                route: route,
-                request: request,
-                channelLabel: "图像",
-                model: result.metadata.model
-            )
-            let renderedImage = NSImage(base64String: result.imageBase64)
-            let resultPayload = AIActionResult(
-                request: request,
-                text: nil,
-                image: renderedImage,
-                imageBase64: result.imageBase64,
-                imageURL: result.imageURL,
-                videoURL: nil,
-                metadata: result.metadata,
-                route: route
-            )
-            logImageResult(resultPayload)
-            return resultPayload
-        case .video:
-            let route = dependencies.currentVideoRoute()
-            let result = try await dependencies.videoService().generateVideo(for: sceneRequest)
-            await recordAudit(
-                jobID: sceneRequest.id,
-                kind: request.kind,
-                jobAction: request.action,
-                route: route,
-                metadata: result.metadata,
-                assetRefs: request.assetReferences,
-                contextDescription: contextDescription,
-                origin: request.origin,
-                module: request.module
-            )
-            notifyIfNeeded(
-                route: route,
-                request: request,
-                channelLabel: "视频",
-                model: result.metadata.model
-            )
-            let resultPayload = AIActionResult(
-                request: request,
-                text: nil,
-                image: nil,
-                imageBase64: nil,
-                imageURL: result.videoURL,
-                videoURL: result.videoURL,
-                metadata: result.metadata,
-                route: route
-            )
-            logVideoResult(resultPayload)
-            return resultPayload
+        let route = dependencies.currentTextRoute()
+        let result = try await dependencies.textService().submit(job: sceneRequest)
+        let renderedImage = Self.decodeImage(base64: result.imageBase64)
+        var textPayload = result.metadata.prompt
+        if let inlineURL = result.imageURL?.absoluteString {
+            textPayload += "\n\(inlineURL)"
+        } else if let base64 = result.imageBase64, base64.isEmpty == false {
+            textPayload += "\ndata:image/png;base64,\(base64)"
         }
+        await recordAudit(
+            jobID: sceneRequest.id,
+            kind: request.kind,
+            jobAction: request.action,
+            route: route,
+            metadata: result.metadata,
+            assetRefs: request.assetReferences,
+            contextDescription: contextDescription,
+            origin: request.origin,
+            module: request.module
+        )
+        if case .storyboardOperation = request.kind {
+        }
+        notifyIfNeeded(
+            route: route,
+            request: request,
+            channelLabel: "文本",
+            model: result.metadata.model
+        )
+        let resultPayload = AIActionResult(
+            request: request,
+            text: textPayload,
+            image: renderedImage,
+            imageBase64: result.imageBase64,
+            imageURL: result.imageURL,
+            videoURL: result.videoURL,
+            metadata: result.metadata,
+            route: route
+        )
+        logTextResult(resultPayload)
+        return resultPayload
     }
 
     func stream(_ request: AIActionRequest) -> AsyncThrowingStream<AIActionStreamEvent, Error> {
         AsyncThrowingStream { continuation in
             Task {
                 do {
-                    guard request.channel == .text else {
-                        let result = try await self.perform(request)
-                        continuation.yield(.completed(result))
-                        continuation.finish()
-                        return
-                    }
-
                     let contextDescription = contextStatusText(
                         override: request.contextSummaryOverride,
                         context: request.context
@@ -333,18 +257,9 @@ final class AIActionCenter: ObservableObject {
     }
 
     private func logRequest(request: AIActionRequest, sceneRequest: SceneJobRequest) {
-        let route = request.channel == .text ? dependencies.currentTextRoute() : dependencies.currentImageRoute()
+            let route = dependencies.currentTextRoute()
         let modelOverride = request.fields["__modelOverride"]
-        let modelLabel: String = {
-            switch request.channel {
-            case .text:
-                return modelOverride ?? dependencies.currentTextModelLabel()
-            case .image:
-                return dependencies.currentImageModelLabel()
-            case .video:
-                return dependencies.currentVideoModelLabel()
-            }
-        }()
+        let modelLabel = modelOverride ?? dependencies.currentTextModelLabel()
         print(
             """
             [AIActionCenter] Request ->

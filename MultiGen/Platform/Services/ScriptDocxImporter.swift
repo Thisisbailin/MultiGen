@@ -1,36 +1,108 @@
 import Foundation
+import AppKit
 
 struct ScriptDocxImportItem {
     let episodeNumber: Int
     let title: String
     let body: String
+    let scenes: [SceneImportItem]
+}
+
+struct SceneImportItem {
+    let index: Int
+    let title: String
+    let body: String
+    let locationHint: String
+    let timeHint: String
+}
+
+struct ScriptImportPayload {
+    let synopsis: String
+    let characters: [ProjectCharacterProfile]
+    let outlines: [EpisodeOutline]
+    let episodes: [ScriptDocxImportItem]
 }
 
 struct ScriptDocxImporter {
-    private let episodePattern = #"第\s*([0-9０-９一二三四五六七八九十百千]+)\s*集"#
+    private let episodePatterns = [
+        #"(?m)^\s*第\s*([0-9０-９〇零一二三四五六七八九十百千万亿兆拾佰仟]+)\s*集[：:\\s·、，,]*"#,
+        #"(?m)^\s*第\s*([一二三四五六七八九十百千万亿兆〇零0-9]+)\s*集"#,
+        #"第\s*([0-9０-９〇零一二三四五六七八九十百千万亿兆拾佰仟]+)\s*集"# // 无行首锚点兜底
+    ]
+    private let sectionPattern = #"【([^】]+)】"#
 
-    func parseDocument(at url: URL) throws -> [ScriptDocxImportItem] {
+    func parseDocument(at url: URL) throws -> ScriptImportPayload {
         guard url.startAccessingSecurityScopedResource() else {
             throw ImportError.accessDenied
         }
         defer { url.stopAccessingSecurityScopedResource() }
 
-        guard let data = try? Data(contentsOf: url) else {
-            throw ImportError.readFailed
-        }
-
-        guard let text = DocxTextExtractor.extractText(from: data) else {
+        guard let raw = DocxTextExtractor.extractText(from: url) ?? PagesTextExtractor.extractText(from: url) else {
             throw ImportError.unsupportedFormat
         }
+        let text = normalize(raw)
 
-        return parseEpisodes(from: text)
+        let sections = extractSections(from: text)
+
+        let synopsis = sections["简介及全文大纲"]?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        let mainCharacters = sections["主要人物"] ?? ""
+        let supporting = sections["相关配角"] ?? ""
+        let characters = parseCharacters(from: mainCharacters + "\n" + supporting)
+        let outlines = parseOutlines(from: sections["分集大纲"] ?? "")
+
+        let episodesText = extractEpisodesText(from: text)
+        let episodes = parseEpisodes(from: episodesText)
+
+        return ScriptImportPayload(
+            synopsis: synopsis,
+            characters: characters,
+            outlines: outlines,
+            episodes: episodes
+        )
+    }
+
+    private func extractSections(from text: String) -> [String: String] {
+        guard let regex = try? NSRegularExpression(pattern: sectionPattern, options: []) else { return [:] }
+        let ns = text as NSString
+        let matches = regex.matches(in: text, options: [], range: NSRange(location: 0, length: ns.length))
+        var sections: [String: String] = [:]
+        for (idx, match) in matches.enumerated() {
+            guard match.numberOfRanges >= 2 else { continue }
+            let name = ns.substring(with: match.range(at: 1))
+            let start = match.range.location + match.range.length
+            let end = (idx + 1 < matches.count) ? matches[idx + 1].range.location : ns.length
+            let range = NSRange(location: start, length: max(end - start, 0))
+            let content = ns.substring(with: range)
+            sections[name] = content
+        }
+        return sections
+    }
+
+    private func extractEpisodesText(from text: String) -> String {
+        let ns = text as NSString
+        guard let (_, matches) = firstEpisodeMatches(in: text),
+              let first = matches.first else {
+            return text
+        }
+        let start = first.range.location
+        let range = NSRange(location: start, length: ns.length - start)
+        return ns.substring(with: range)
     }
 
     private func parseEpisodes(from text: String) -> [ScriptDocxImportItem] {
-        let regex = try? NSRegularExpression(pattern: episodePattern, options: [])
-        guard let regex else { return [] }
+        guard let (regex, matches) = firstEpisodeMatches(in: text) else {
+            let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard trimmed.isEmpty == false else { return [] }
+            return [
+                ScriptDocxImportItem(
+                    episodeNumber: 1,
+                    title: "整片",
+                    body: trimmed,
+                    scenes: parseScenes(in: trimmed, episodeNumber: 1)
+                )
+            ]
+        }
         let nsText = text as NSString
-        let matches = regex.matches(in: text, options: [], range: NSRange(location: 0, length: nsText.length))
 
         var items: [ScriptDocxImportItem] = []
         for (index, match) in matches.enumerated() {
@@ -42,10 +114,79 @@ struct ScriptDocxImporter {
             let contentEnd = (index + 1 < matches.count) ? matches[index + 1].range.location : nsText.length
             let bodyRange = NSRange(location: contentStart, length: max(contentEnd - contentStart, 0))
             let body = nsText.substring(with: bodyRange).trimmingCharacters(in: .whitespacesAndNewlines)
+            let scenes = parseScenes(in: body, episodeNumber: episodeNumber)
             let title = "第\(episodeNumber)集"
-            items.append(ScriptDocxImportItem(episodeNumber: episodeNumber, title: title, body: body))
+            items.append(ScriptDocxImportItem(episodeNumber: episodeNumber, title: title, body: body, scenes: scenes))
         }
         return items
+    }
+
+    private func firstEpisodeMatches(in text: String) -> (NSRegularExpression, [NSTextCheckingResult])? {
+        let ns = text as NSString
+        for pattern in episodePatterns {
+            if let regex = try? NSRegularExpression(pattern: pattern, options: []) {
+                let matches = regex.matches(in: text, options: [], range: NSRange(location: 0, length: ns.length))
+                if matches.isEmpty == false {
+                    return (regex, matches)
+                }
+            }
+        }
+        return nil
+    }
+
+    private func parseScenes(in body: String, episodeNumber: Int) -> [SceneImportItem] {
+        let pattern = #"(?m)^\s*(\d+)[-—–](\d+)\s*$"#
+        guard let regex = try? NSRegularExpression(pattern: pattern, options: []) else { return [] }
+        let nsBody = body as NSString
+        let matches = regex.matches(in: body, options: [], range: NSRange(location: 0, length: nsBody.length))
+
+        guard matches.isEmpty == false else {
+            let trimmed = body.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard trimmed.isEmpty == false else { return [] }
+            return [
+                SceneImportItem(
+                    index: 1,
+                    title: "第\(episodeNumber)集",
+                    body: trimmed,
+                    locationHint: "",
+                    timeHint: ""
+                )
+            ]
+        }
+
+        var scenes: [SceneImportItem] = []
+        for (index, match) in matches.enumerated() {
+            let sceneStart = match.range.location + match.range.length
+            let sceneEnd = (index + 1 < matches.count) ? matches[index + 1].range.location : nsBody.length
+            let sceneRange = NSRange(location: sceneStart, length: max(sceneEnd - sceneStart, 0))
+            let sceneBlock = nsBody.substring(with: sceneRange)
+            let parsed = parseSceneBlock(sceneBlock, fallbackIndex: index + 1, episodeNumber: episodeNumber)
+            scenes.append(parsed)
+        }
+        return scenes
+    }
+
+    private func normalize(_ text: String) -> String {
+        var normalized = text
+        let replacements: [String: String] = [
+            "\u{00A0}": " ",
+            "\u{200B}": "",
+            "\u{2028}": "\n",
+            "\u{2029}": "\n",
+            "\u{FEFF}": "",
+            "\r\n": "\n",
+            "\r": "\n",
+            "\u{202F}": " "
+        ]
+        for (k, v) in replacements {
+            normalized = normalized.replacingOccurrences(of: k, with: v)
+        }
+        return normalized
+    }
+
+    private func stripPunctuation(_ text: String) -> String {
+        let punctuation = CharacterSet(charactersIn: "。！？！，、；：？！（）【】《》“”‘’")
+        return text.trimmingCharacters(in: punctuation.union(.whitespacesAndNewlines))
     }
 
     private func parseEpisodeNumber(from string: String) -> Int {
@@ -75,6 +216,106 @@ struct ScriptDocxImporter {
         return max(total, 1)
     }
 
+    private func parseCharacters(from text: String) -> [ProjectCharacterProfile] {
+        let lines = text
+            .components(separatedBy: .newlines)
+            .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+            .filter { $0.isEmpty == false }
+
+        var result: [ProjectCharacterProfile] = []
+        let pattern = #"^\s*([^（(：:]+)\s*[（(]([^）)]*)[)）]?\s*(.*)$"#
+        let regex = try? NSRegularExpression(pattern: pattern, options: [])
+
+        for line in lines {
+            if let regex,
+               let match = regex.firstMatch(in: line, options: [], range: NSRange(location: 0, length: (line as NSString).length)),
+               match.numberOfRanges >= 4 {
+                let ns = line as NSString
+                let name = ns.substring(with: match.range(at: 1)).trimmingCharacters(in: .whitespacesAndNewlines)
+                let role = ns.substring(with: match.range(at: 2)).trimmingCharacters(in: .whitespacesAndNewlines)
+                let rest = ns.substring(with: match.range(at: 3)).trimmingCharacters(in: .whitespacesAndNewlines)
+                let desc = [role, rest].filter { $0.isEmpty == false }.joined(separator: "｜")
+                result.append(ProjectCharacterProfile(name: name, description: desc))
+            } else {
+                result.append(ProjectCharacterProfile(name: line, description: ""))
+            }
+        }
+        return result
+    }
+
+    private func parseOutlines(from text: String) -> [EpisodeOutline] {
+        let lines = text
+            .components(separatedBy: .newlines)
+            .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+            .filter { $0.isEmpty == false && $0.hasPrefix("第") }
+        var outlines: [EpisodeOutline] = []
+        let pattern = #"第\s*([0-9０-９一二三四五六七八九十百千]+)\s*集[:：]\s*(.+)"#
+        let regex = try? NSRegularExpression(pattern: pattern, options: [])
+        for line in lines {
+            if let regex,
+               let match = regex.firstMatch(in: line, options: [], range: NSRange(location: 0, length: (line as NSString).length)),
+               match.numberOfRanges >= 3 {
+                let ns = line as NSString
+                let numberString = ns.substring(with: match.range(at: 1))
+                let number = parseEpisodeNumber(from: numberString)
+                let summary = ns.substring(with: match.range(at: 2)).trimmingCharacters(in: .whitespacesAndNewlines)
+                outlines.append(EpisodeOutline(episodeNumber: number, title: "第\(number)集", summary: summary))
+            }
+        }
+        return outlines.sorted { $0.episodeNumber < $1.episodeNumber }
+    }
+
+    private func parseSceneBlock(_ block: String, fallbackIndex: Int, episodeNumber: Int) -> SceneImportItem {
+        let lines = block
+            .components(separatedBy: .newlines)
+            .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+            .filter { $0.isEmpty == false }
+
+        var title = "场景\(fallbackIndex)"
+        var location = ""
+        var time = ""
+        var bodyLines: [String] = []
+        var charactersLine: String?
+
+        for line in lines {
+            if line.hasPrefix("场景") {
+                if let range = line.range(of: "：") ?? line.range(of: ":") {
+                    let value = String(line[range.upperBound...]).trimmingCharacters(in: .whitespacesAndNewlines)
+                    title = stripPunctuation(value)
+                    location = title
+                    continue
+                }
+            }
+            if line.hasPrefix("人物") {
+                charactersLine = line
+                continue
+            }
+            if time.isEmpty, line.contains("日") || line.contains("夜") || line.contains("晨") || line.contains("晚") || line.contains("内") || line.contains("外") {
+                time = stripPunctuation(line)
+                continue
+            }
+            bodyLines.append(line)
+        }
+
+        if title.isEmpty {
+            title = "第\(episodeNumber)集 · 场景\(fallbackIndex)"
+        }
+
+        if let charactersLine {
+            bodyLines.insert(charactersLine, at: 0)
+        }
+
+        let body = bodyLines.joined(separator: "\n").trimmingCharacters(in: .whitespacesAndNewlines)
+
+        return SceneImportItem(
+            index: fallbackIndex,
+            title: title,
+            body: body,
+            locationHint: location,
+            timeHint: time
+        )
+    }
+
     enum ImportError: LocalizedError {
         case accessDenied
         case readFailed
@@ -94,9 +335,16 @@ struct ScriptDocxImporter {
 }
 
 private enum DocxTextExtractor {
-    static func extractText(from data: Data) -> String? {
-        guard let archive = try? DocxArchive(data: data) else { return nil }
-        return archive.extractDocumentText()
+    static func extractText(from url: URL) -> String? {
+        if url.pathExtension.lowercased() == "docx",
+           let data = try? Data(contentsOf: url),
+           let archive = try? DocxArchive(data: data) {
+            return archive.extractDocumentText()
+        }
+        if let attributed = try? NSAttributedString(url: url, options: [:], documentAttributes: nil) {
+            return attributed.string
+        }
+        return nil
     }
 }
 

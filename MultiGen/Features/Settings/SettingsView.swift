@@ -1,5 +1,4 @@
 import SwiftUI
-import AppKit
 
 private enum SettingsSection: Hashable, CaseIterable, Identifiable {
     case general
@@ -135,7 +134,40 @@ private struct AgentSettingsTab: View {
     var body: some View {
         Form {
             Section("代理") {
-                Text("代理能力配置即将上线。")
+                ForEach(AgentData.agents) { agent in
+                    VStack(alignment: .leading, spacing: 4) {
+                        Text(agent.name)
+                            .font(.headline)
+                        Text(agent.role)
+                            .font(.subheadline)
+                            .foregroundStyle(.secondary)
+                        Text("对应模块：\(agent.module)")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
+                    if agent.id != AgentData.agents.last?.id {
+                        Divider()
+                    }
+                }
+            }
+            Section("技能（工具）") {
+                ForEach(AgentData.skills) { skill in
+                    VStack(alignment: .leading, spacing: 4) {
+                        Text(skill.name)
+                            .font(.headline)
+                        Text(skill.scope)
+                            .font(.subheadline)
+                            .foregroundStyle(.secondary)
+                        Text("适用代理：\(skill.agents)")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
+                    if skill.id != AgentData.skills.last?.id {
+                        Divider()
+                    }
+                }
+                Text("以上为前端占位说明，后续扩展时可在此增加配置项。")
+                    .font(.footnote)
                     .foregroundStyle(.secondary)
             }
         }
@@ -144,31 +176,39 @@ private struct AgentSettingsTab: View {
     }
 }
 
-private struct CollaborationSettingsTab: View {
-    enum TestChannel: String, CaseIterable, Identifiable {
-        case text
-        case image
-        case video
-
-        var id: String { rawValue }
-
-        var title: String {
-            switch self {
-            case .text: return "文本"
-            case .image: return "图像"
-            case .video: return "视频"
-            }
-        }
-
-        var promptPlaceholder: String {
-            switch self {
-            case .text: return "请回复 OK"
-            case .image: return "一张简洁的测试图片"
-            case .video: return "一个 2 秒的简短测试视频"
-            }
-        }
+private enum AgentData {
+    struct Agent: Identifiable {
+        let id = UUID()
+        let name: String
+        let role: String
+        let module: String
     }
 
+    struct Skill: Identifiable {
+        let id = UUID()
+        let name: String
+        let scope: String
+        let agents: String
+    }
+
+    static let agents: [Agent] = [
+        .init(name: "创意师", role: "主页聊天 · 灵感/对话建议", module: "主页模块"),
+        .init(name: "剧作师", role: "剧本助手 · 按集润色/总结", module: "剧本模块"),
+        .init(name: "分镜师", role: "分镜助手 · 场景分镜生成", module: "分镜模块"),
+        .init(name: "指令师", role: "提示词助手 · 角色/场景提示词生成", module: "角色/场景模块")
+    ]
+
+    static let skills: [Skill] = [
+        .init(name: "项目总结", scope: "生成项目简介/标签/人物/场景", agents: "剧作师"),
+        .init(name: "分镜生成", scope: "整场景镜头拆解并写入分镜板", agents: "分镜师"),
+        .init(name: "提示词生成", scope: "角色/场景文生图提示词", agents: "指令师"),
+        .init(name: "通用协作", scope: "开放式对话/创意建议", agents: "创意师"),
+        .init(name: "上下文工具（规划中）", scope: "更精细的上下文抽取/检索", agents: "创意师、剧作师、分镜师、指令师"),
+        .init(name: "内容优化（规划中）", scope: "剧情、文案、提示词的质量优化", agents: "剧作师、指令师")
+    ]
+}
+
+private struct CollaborationSettingsTab: View {
     @EnvironmentObject private var actionCenter: AIActionCenter
     @EnvironmentObject private var configuration: AppConfiguration
 
@@ -177,20 +217,12 @@ private struct CollaborationSettingsTab: View {
     @State private var relayAPIKey = ""
     @State private var relayModels: [String] = []
     @State private var relaySelectedTextModel: String = ""
-    @State private var relaySelectedImageModel: String = ""
-    @State private var relaySelectedVideoModel: String = ""
-    @State private var relaySelectedMultimodalModel: String = ""
     @State private var isSyncingRelayModels = false
     @State private var syncStatus: String?
 
-    @State private var testChannel: TestChannel = .text
-    @State private var textTestInput: String = TestChannel.text.promptPlaceholder
-    @State private var imageTestInput: String = TestChannel.image.promptPlaceholder
-    @State private var videoTestInput: String = TestChannel.video.promptPlaceholder
+    @State private var textTestInput: String = "请回复 OK"
     @State private var testStatus: String?
     @State private var testResponse: String = ""
-    @State private var testImage: NSImage?
-    @State private var testVideoURL: URL?
     @State private var isTesting = false
 
     @State private var isExportingAudit = false
@@ -224,15 +256,6 @@ private struct CollaborationSettingsTab: View {
         }
         .onChange(of: relaySelectedTextModel) { _, newValue in
             configuration.updateRelaySelectedTextModel(newValue.isEmpty ? nil : newValue)
-        }
-        .onChange(of: relaySelectedImageModel) { _, newValue in
-            configuration.updateRelaySelectedImageModel(newValue.isEmpty ? nil : newValue)
-        }
-        .onChange(of: relaySelectedVideoModel) { _, newValue in
-            configuration.updateRelaySelectedVideoModel(newValue.isEmpty ? nil : newValue)
-        }
-        .onChange(of: relaySelectedMultimodalModel) { _, newValue in
-            configuration.updateRelaySelectedMultimodalModel(newValue.isEmpty ? nil : newValue)
         }
     }
 
@@ -277,27 +300,6 @@ private struct CollaborationSettingsTab: View {
                 }
             }
             .disabled(relayModels.isEmpty)
-
-            Picker("多模态模型", selection: $relaySelectedMultimodalModel) {
-                ForEach(relayModels, id: \.self) { id in
-                    Text(id).tag(id)
-                }
-            }
-            .disabled(relayModels.isEmpty)
-
-            Picker("图像模型", selection: $relaySelectedImageModel) {
-                ForEach(relayModels, id: \.self) { id in
-                    Text(id).tag(id)
-                }
-            }
-            .disabled(relayModels.isEmpty)
-
-            Picker("视频模型", selection: $relaySelectedVideoModel) {
-                ForEach(relayModels, id: \.self) { id in
-                    Text(id).tag(id)
-                }
-            }
-            .disabled(relayModels.isEmpty)
         }
     }
 
@@ -314,14 +316,7 @@ private struct CollaborationSettingsTab: View {
     @ViewBuilder
     private var availabilityTestSection: some View {
         Section("可用性测试") {
-            Picker("测试类型", selection: $testChannel) {
-                ForEach(TestChannel.allCases) { channel in
-                    Text(channel.title).tag(channel)
-                }
-            }
-            .pickerStyle(.segmented)
-
-            TextField("测试提示词", text: currentPromptBinding, axis: .vertical)
+            TextField("测试提示词", text: $textTestInput, axis: .vertical)
                 .textFieldStyle(.roundedBorder)
                 .lineLimit(3, reservesSpace: true)
 
@@ -343,39 +338,17 @@ private struct CollaborationSettingsTab: View {
                     .foregroundStyle(.secondary)
             }
 
-            switch testChannel {
-            case .text:
-                if testResponse.isEmpty == false {
-                    ScrollView {
-                        Text(testResponse)
-                            .frame(maxWidth: .infinity, alignment: .leading)
-                    }
-                    .frame(minHeight: 100, maxHeight: 180)
-                    .padding(8)
-                    .background(
-                        RoundedRectangle(cornerRadius: 10, style: .continuous)
-                            .fill(Color(nsColor: .windowBackgroundColor))
-                    )
+            if testResponse.isEmpty == false {
+                ScrollView {
+                    Text(testResponse)
+                        .frame(maxWidth: .infinity, alignment: .leading)
                 }
-            case .image:
-                if let preview = testImage {
-                    Image(nsImage: preview)
-                        .resizable()
-                        .scaledToFit()
-                        .frame(maxHeight: 180)
-                        .cornerRadius(12)
-                        .overlay(
-                            RoundedRectangle(cornerRadius: 12, style: .continuous)
-                                .stroke(Color.secondary.opacity(0.2))
-                        )
-                }
-            case .video:
-                if let url = testVideoURL {
-                    Text(url.absoluteString)
-                        .font(.footnote)
-                        .foregroundStyle(.secondary)
-                        .textSelection(.enabled)
-                }
+                .frame(minHeight: 100, maxHeight: 180)
+                .padding(8)
+                .background(
+                    RoundedRectangle(cornerRadius: 10, style: .continuous)
+                        .fill(Color(nsColor: .windowBackgroundColor))
+                )
             }
         }
     }
@@ -398,34 +371,12 @@ private struct CollaborationSettingsTab: View {
 
     // MARK: - Helpers
 
-    private var currentPromptBinding: Binding<String> {
-        Binding<String>(
-            get: {
-                switch testChannel {
-                case .text: return textTestInput
-                case .image: return imageTestInput
-                case .video: return videoTestInput
-                }
-            },
-            set: { newValue in
-                switch testChannel {
-                case .text: textTestInput = newValue
-                case .image: imageTestInput = newValue
-                case .video: videoTestInput = newValue
-                }
-            }
-        )
-    }
-
     private func loadState() {
         providerName = configuration.relayProviderName
         relayBaseURL = configuration.relayAPIBase
         relayAPIKey = configuration.relayAPIKey
         relayModels = configuration.relayAvailableModels
         relaySelectedTextModel = configuration.relaySelectedTextModel ?? ""
-        relaySelectedImageModel = configuration.relaySelectedImageModel ?? ""
-        relaySelectedVideoModel = configuration.relaySelectedVideoModel ?? ""
-        relaySelectedMultimodalModel = configuration.relaySelectedMultimodalModel ?? ""
     }
 
     // MARK: - Actions
@@ -483,9 +434,6 @@ private struct CollaborationSettingsTab: View {
             configuration.updateRelayModels(models)
 
             if relaySelectedTextModel.isEmpty { relaySelectedTextModel = models.first ?? "" }
-            if relaySelectedImageModel.isEmpty { relaySelectedImageModel = models.first ?? "" }
-            if relaySelectedVideoModel.isEmpty { relaySelectedVideoModel = models.first ?? "" }
-            if relaySelectedMultimodalModel.isEmpty { relaySelectedMultimodalModel = models.first ?? "" }
             syncStatus = "同步完成，共 \(models.count) 个模型。"
         } catch {
             syncStatus = "同步失败：\(error.localizedDescription)"
@@ -527,36 +475,19 @@ private struct CollaborationSettingsTab: View {
         isTesting = true
         testStatus = nil
         testResponse = ""
-        testImage = nil
-        testVideoURL = nil
         defer { isTesting = false }
 
-        let prompt = currentPromptBinding.wrappedValue.trimmingCharacters(in: .whitespacesAndNewlines)
+        let prompt = textTestInput.trimmingCharacters(in: .whitespacesAndNewlines)
         guard prompt.isEmpty == false else {
             testStatus = "请输入测试提示词。"
             return
         }
 
-        switch testChannel {
-        case .text:
-            guard relaySelectedTextModel.isEmpty == false else {
-                testStatus = "请先选择文本模型。"
-                return
-            }
-            await submitTextTest(prompt: prompt)
-        case .image:
-            guard relaySelectedImageModel.isEmpty == false else {
-                testStatus = "请先选择图像模型。"
-                return
-            }
-            await submitImageTest(prompt: prompt)
-        case .video:
-            guard relaySelectedVideoModel.isEmpty == false else {
-                testStatus = "请先选择视频模型。"
-                return
-            }
-            await submitVideoTest(prompt: prompt)
+        guard relaySelectedTextModel.isEmpty == false else {
+            testStatus = "请先选择文本模型。"
+            return
         }
+        await submitTextTest(prompt: prompt)
     }
 
     private func submitTextTest(prompt: String) async {
@@ -590,58 +521,6 @@ private struct CollaborationSettingsTab: View {
         }
     }
 
-    private func submitImageTest(prompt: String) async {
-        let request = AIActionRequest(
-            kind: .diagnostics,
-            action: .generateScene,
-            channel: .image,
-            fields: ["prompt": prompt],
-            assetReferences: [],
-            module: .aiConsole,
-            context: .general,
-            contextSummaryOverride: "设置 · 图像可用性",
-            origin: "设置诊断"
-        )
-
-        do {
-            let result = try await actionCenter.perform(request)
-            if let image = result.image {
-                testImage = image
-                testStatus = "图像测试成功 · \(result.metadata.model)"
-            } else {
-                testStatus = "返回中未包含图像。"
-            }
-        } catch {
-            testStatus = "失败：\(error.localizedDescription)"
-        }
-    }
-
-    private func submitVideoTest(prompt: String) async {
-        let request = AIActionRequest(
-            kind: .diagnostics,
-            action: .generateScene,
-            channel: .video,
-            fields: ["prompt": prompt],
-            assetReferences: [],
-            module: .aiConsole,
-            context: .general,
-            contextSummaryOverride: "设置 · 视频可用性",
-            origin: "设置诊断"
-        )
-
-        do {
-            let result = try await actionCenter.perform(request)
-            if let url = result.videoURL {
-                testVideoURL = url
-                testStatus = "视频测试成功。"
-            } else {
-                testStatus = "未返回视频 URL。"
-            }
-        } catch {
-            testStatus = "失败：\(error.localizedDescription)"
-        }
-    }
-
     private func exportAuditLog() {
         isExportingAudit = true
         testStatus = "审计文件位于 Application Support/MultiGen/audit-log.json"
@@ -654,7 +533,7 @@ private struct AboutSettingsTab: View {
         Form {
             Section("关于") {
                 Text("MultiGen — 智能协同创作工具（单一中转线路版）")
-                Text("当前版本仅使用 OpenAI 样式 API 中转，支持文本/图像/视频模型。")
+                Text("当前版本仅使用 OpenAI 样式 API 中转，聚焦文本模型。")
                     .font(.footnote)
                     .foregroundStyle(.secondary)
             }

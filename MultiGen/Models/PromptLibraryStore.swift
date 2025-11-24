@@ -14,6 +14,9 @@ struct PromptDocument: Identifiable, Codable, Hashable {
         case script
         case storyboard
         case scriptProjectSummary
+        case promptHelperCharacterScene
+        case promptHelperStyle
+        case promptHelperStoryboard
 
         var id: String { rawValue }
 
@@ -27,6 +30,12 @@ struct PromptDocument: Identifiable, Codable, Hashable {
                 return "分镜助手"
             case .scriptProjectSummary:
                 return "项目总结"
+            case .promptHelperCharacterScene:
+                return "提示词助手 · 角色/场景"
+            case .promptHelperStyle:
+                return "提示词助手 · 风格"
+            case .promptHelperStoryboard:
+                return "提示词助手 · 分镜（占位）"
             }
         }
 
@@ -40,6 +49,12 @@ struct PromptDocument: Identifiable, Codable, Hashable {
                 return "用于 AI 分镜助手的系统提示词模版。"
             case .scriptProjectSummary:
                 return "用于生成项目级简介/总结的系统提示词。"
+            case .promptHelperCharacterScene:
+                return "为角色与场景生成/优化文生图提示词，偏重造型/材质/光线/空间感等美术向描述。"
+            case .promptHelperStyle:
+                return "分析风格参考图，提炼可复用的风格提示词（导演/美术向）。"
+            case .promptHelperStoryboard:
+                return "分镜提示词助手占位，后续用于补充镜头级提示词。"
             }
         }
     }
@@ -236,6 +251,47 @@ final class PromptLibraryStore: ObservableObject {
 2. 保持中文表达，兼顾文学性与执行性，便于快速理解项目价值。
 3. 若信息残缺（无角色/场景等），明确指出仍缺少的要素并提出补充建议。
 4. 控制在 250~350 字，可用小标题或列表提升可读性；避免空泛形容词。
+"""
+            )
+        case .promptHelperCharacterScene:
+            return PromptDocument(
+                module: .promptHelperCharacterScene,
+                title: "提示词助手 · 角色/场景",
+                content: """
+你是影视项目的美术设计师，需为角色或场景撰写中文文生图提示词。
+输入只包含：角色/场景名称与简短描述（无剧本原文）。
+
+要求：
+1. 仅输出一段提示词，不要列表/解释/代码块。
+2. 角色：写清外观、服装、材质、气质、姿态、光线、镜头感/景别、时代与地域风格；可加入情绪或标志性道具。
+3. 场景：写清空间/环境、光线/色调、时间、材质细节、景别/构图、氛围与关键道具。
+4. 避免堆砌英语或空泛词，控制在一段内可直接用于专业生图平台。
+"""
+            )
+        case .promptHelperStyle:
+            return PromptDocument(
+                module: .promptHelperStyle,
+                title: "提示词助手 · 风格",
+                content: """
+你是一名具备导演和美术指导经验的风格分析师。系统会提供一张参考图（imageAttachment1Base64 / imageBase64）。请先客观观察图片内容，再输出一段可直接用于文生图的中文提示词。
+
+要求：
+1. 只输出提示词正文，不要解释、不要代码块；长度 300-500 字。
+2. 必须根据图片反推：主体/场景、外观细节、光线方向与质感、色调对比、材质纹理、构图/景别/镜头感、时代或流派（如胶片颗粒/新黑色/赛博朋克等）。如图片无人物/无主体，请明确写“无人物”并仅描绘可见场景。
+3. 用简短中文短语串联，保持连贯，避免堆砌英文或无关形容词。
+4. 图片以 Base64 提供，必须基于图片内容描述；若无法解码或画面不清晰，请直接说明问题，禁止臆造不存在的元素。
+"""
+            )
+        case .promptHelperStoryboard:
+            return PromptDocument(
+                module: .promptHelperStoryboard,
+                title: "提示词助手 · 分镜",
+                content: """
+你是专业分镜提示词设计师。输入包含当前场景的分镜脚本（按镜号顺序，含景别/运镜/画面概述/台词/声音）。
+
+任务：为每个镜头生成中文文生图提示词。
+- 输出 JSON：{"prompts":[{"shotNumber":1,"prompt":"..."}]}，仅输出 JSON。
+- 每条提示词聚焦镜头画面/光线/色调/构图/焦段/运动/材质等，避免多余解释。
 """
             )
         }

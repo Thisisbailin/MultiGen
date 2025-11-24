@@ -35,7 +35,7 @@ struct StoryboardPromptBuilder {
         输出要求：
         1) 仅输出 {"scenes":[...]} JSON，不要使用 ```json 或其他说明；
         2) 每个 scene 对象必须包含 sceneId、sceneTitle、sceneSummary、shots；
-        3) shots 内需包含 shotNumber/shotScale/cameraMovement/duration/dialogueOrOS/visualSummary/soundDesign/aiPrompt，shotNumber 在所属场景内递增；
+        3) shots 内需包含 shotNumber/shotScale/cameraMovement/duration/dialogueOrOS/visualSummary/soundDesign（无需提示词），shotNumber 在所属场景内递增；
         4) 严禁创建新场景或把多个场景合并；
         5) 无法生成时返回 {"scenes":[]}。
         """

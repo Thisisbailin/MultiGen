@@ -111,12 +111,30 @@ final class StoryboardDialogueStore: ObservableObject {
     }
 
     var selectedSceneDisplay: String {
-        currentScene?.title ?? "未选择场景"
+        currentScene?.displayTitle ?? "未选择场景"
     }
 
     var selectedShotDisplay: String {
         guard let entry = selectedEntry else { return "未选择镜头" }
         return "镜 \(entry.fields.shotNumber)"
+    }
+
+    func applyShotPrompts(sceneID: UUID?, prompts: [Int: String]) {
+        let targetSceneID = sceneID
+        let targetEntries = entries.filter { entry in
+            if let targetSceneID {
+                return entry.sceneID == targetSceneID
+            }
+            return true
+        }
+        for entry in targetEntries {
+            if let prompt = prompts[entry.fields.shotNumber] {
+                updateEntry(entry.id, userSummary: "写入提示词") { mutable in
+                    mutable.fields.aiPrompt = prompt
+                }
+            }
+        }
+        infoBanner = "已写入 \(prompts.count) 个镜头提示词"
     }
 
     func selectProject(id: UUID?) {
@@ -384,6 +402,7 @@ final class StoryboardDialogueStore: ObservableObject {
             if fields.shotNumber <= 0 {
                 fields.shotNumber = nextShotNumber(for: sceneDetails.id, cache: &nextShotCache)
             }
+            fields.aiPrompt = ""
 
             if let index = updatedEntries.firstIndex(where: { $0.sceneID == sceneDetails.id && $0.fields.shotNumber == fields.shotNumber }) {
                 var entry = updatedEntries[index]
@@ -555,6 +574,8 @@ final class StoryboardDialogueStore: ObservableObject {
                 summary: scriptScene.summary,
                 body: scriptScene.body,
                 order: scriptScene.order,
+                locationHint: scriptScene.locationHint,
+                timeHint: scriptScene.timeHint,
                 entries: filtered
             )
         }
@@ -661,9 +682,17 @@ struct StoryboardSceneViewModel: Identifiable {
     let summary: String
     let body: String
     let order: Int
+    let locationHint: String
+    let timeHint: String
     let entries: [StoryboardEntry]
 
     var countDescription: String {
         "\(entries.count) 个分镜"
+    }
+
+    var displayTitle: String {
+        let extras = [locationHint, timeHint].filter { $0.isEmpty == false }
+        guard extras.isEmpty == false else { return title }
+        return ([title] + extras).joined(separator: " · ")
     }
 }

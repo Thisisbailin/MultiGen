@@ -13,7 +13,7 @@ struct MultiGenApp: App {
     @StateObject private var scriptStore: ScriptStore
     @StateObject private var storyboardStore: StoryboardStore
     @StateObject private var promptLibraryStore: PromptLibraryStore
-    @StateObject private var imagingStore: ImagingStore
+    @StateObject private var styleLibraryStore: StyleLibraryStore
     @StateObject private var navigationStore: NavigationStore
     @StateObject private var actionCenter: AIActionCenter
 
@@ -22,12 +22,13 @@ struct MultiGenApp: App {
         let script = ScriptStore()
         let storyboard = StoryboardStore()
         let prompt = PromptLibraryStore()
+        let style = StyleLibraryStore()
         let navigation = NavigationStore()
         _dependencies = StateObject(wrappedValue: deps)
         _scriptStore = StateObject(wrappedValue: script)
         _storyboardStore = StateObject(wrappedValue: storyboard)
         _promptLibraryStore = StateObject(wrappedValue: prompt)
-        _imagingStore = StateObject(wrappedValue: ImagingStore())
+        _styleLibraryStore = StateObject(wrappedValue: style)
         _navigationStore = StateObject(wrappedValue: navigation)
         let center = AIActionCenter(
             dependencies: deps,
@@ -44,7 +45,7 @@ struct MultiGenApp: App {
                 .environmentObject(scriptStore)
                 .environmentObject(storyboardStore)
                 .environmentObject(promptLibraryStore)
-                .environmentObject(imagingStore)
+                .environmentObject(styleLibraryStore)
                 .environmentObject(navigationStore)
                 .environmentObject(actionCenter)
         }
@@ -54,6 +55,7 @@ struct MultiGenApp: App {
                 .environmentObject(actionCenter)
                 .environmentObject(dependencies.configuration)
                 .environmentObject(navigationStore)
+                .environmentObject(styleLibraryStore)
         }
     }
 }

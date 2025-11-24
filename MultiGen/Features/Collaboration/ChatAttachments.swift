@@ -76,7 +76,4 @@ struct ImageAttachment: Identifiable, Equatable {
     let fileName: String
 
     var base64String: String { data.base64EncodedString() }
-    var payload: ImagingAttachmentPayload {
-        ImagingAttachmentPayload(fileName: fileName, base64Data: base64String)
-    }
 }

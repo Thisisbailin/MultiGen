@@ -16,6 +16,7 @@ struct ContentView: View {
     @EnvironmentObject private var scriptStore: ScriptStore
     @EnvironmentObject private var storyboardStore: StoryboardStore
     @EnvironmentObject private var promptLibraryStore: PromptLibraryStore
+    @EnvironmentObject private var styleLibraryStore: StyleLibraryStore
     @EnvironmentObject private var navigationStore: NavigationStore
 
     var body: some View {
@@ -88,7 +89,7 @@ struct ContentView: View {
                         .frame(minWidth: 520, minHeight: 420)
                 }
         }
-        .toolbarBackground(.hidden, for: .automatic)
+        .toolbarBackground(.visible, for: .automatic)
         .task { }
         .preferredColorScheme(configuration.appearance.colorScheme)
     }
@@ -99,9 +100,7 @@ struct ContentView: View {
         case .home:
             HomeDashboardView(
                 textModelLabel: dependencies.currentTextModelLabel(),
-                imageModelLabel: dependencies.currentImageModelLabel(),
-                textRouteLabel: dependencies.currentTextRoute().displayName,
-                imageRouteLabel: dependencies.currentImageRoute().displayName
+                textRouteLabel: dependencies.currentTextRoute().displayName
             )
             .navigationTitle("MultiGen 控制台")
         case .script:
@@ -117,16 +116,29 @@ struct ContentView: View {
                 )
             }
                 .navigationTitle("分镜")
-        case .image:
-            ImagingView()
-                .navigationTitle("影像")
-        case .libraryCharacters, .libraryScenes, .libraryPrompts:
+        case .libraryStyles, .libraryCharacters, .libraryScenes, .libraryPrompts:
             if item == .libraryPrompts {
                 PromptLibraryView()
                     .environmentObject(promptLibraryStore)
                     .environmentObject(scriptStore)
                     .environmentObject(navigationStore)
                     .navigationTitle("指令资料库")
+            } else if item == .libraryStyles {
+                StyleLibraryView()
+                    .environmentObject(styleLibraryStore)
+                    .environmentObject(promptLibraryStore)
+                    .environmentObject(actionCenter)
+                    .navigationTitle("风格资料库")
+            } else if item == .libraryCharacters {
+                CharacterLibraryView()
+                    .environmentObject(scriptStore)
+                    .environmentObject(navigationStore)
+                    .navigationTitle("角色资料库")
+            } else if item == .libraryScenes {
+                SceneLibraryView()
+                    .environmentObject(scriptStore)
+                    .environmentObject(navigationStore)
+                    .navigationTitle("场景资料库")
             } else {
                 LibraryPlaceholderView(title: item.title)
             }
@@ -139,13 +151,13 @@ enum SidebarItem: String, Identifiable {
     case home
     case script
     case storyboard
-    case image
+    case libraryStyles
     case libraryCharacters
     case libraryScenes
     case libraryPrompts
 
-    static let primaryItems: [SidebarItem] = [.home, .script, .storyboard, .image]
-    static let libraryItems: [SidebarItem] = [.libraryCharacters, .libraryScenes, .libraryPrompts]
+    static let primaryItems: [SidebarItem] = [.home, .script, .storyboard]
+    static let libraryItems: [SidebarItem] = [.libraryStyles, .libraryCharacters, .libraryScenes, .libraryPrompts]
 
     var id: String { rawValue }
 
@@ -154,7 +166,7 @@ enum SidebarItem: String, Identifiable {
         case .home: return "主页"
         case .script: return "剧本"
         case .storyboard: return "分镜"
-        case .image: return "影像"
+        case .libraryStyles: return "风格"
         case .libraryCharacters: return "角色"
         case .libraryScenes: return "场景"
         case .libraryPrompts: return "指令"
@@ -166,7 +178,7 @@ enum SidebarItem: String, Identifiable {
         case .home: return "house"
         case .script: return "book.pages"
         case .storyboard: return "rectangle.3.offgrid"
-        case .image: return "sparkles"
+        case .libraryStyles: return "paintpalette"
         case .libraryCharacters: return "person.crop.square"
         case .libraryScenes: return "square.grid.3x3"
         case .libraryPrompts: return "text.quote"
@@ -184,12 +196,23 @@ enum ChatThreadKey: Hashable {
     case scriptEpisode(UUID)
     case storyboard(UUID)
     case project(UUID)
-    case image
+    case promptHelper(projectID: UUID, targetID: UUID)
 }
 
 struct PendingThreadRequest: Equatable {
     let key: ChatThreadKey
     let module: AIChatModule
+}
+
+struct PromptHelperRequest: Equatable {
+    enum Target: String {
+        case character
+        case scene
+    }
+
+    let projectID: UUID
+    let targetID: UUID
+    let target: Target
 }
 
 struct StoredChatMessage: Equatable {
@@ -229,7 +252,10 @@ final class NavigationStore: ObservableObject {
     @Published var currentStoryboardEpisodeID: UUID?
     @Published var currentStoryboardSceneID: UUID?
     @Published var currentStoryboardSceneSnapshot: StoryboardSceneContextSnapshot?
+    @Published var currentLibraryCharacterID: UUID?
+    @Published var currentLibrarySceneID: UUID?
     @Published var pendingProjectSummaryID: UUID?
+    @Published var pendingPromptHelper: PromptHelperRequest?
     @Published var pendingAIChatSystemMessage: String?
     @Published var chatThreads: [ChatThreadKey: [StoredChatMessage]] = [:]
     @Published var isShowingConversationHistory = false
@@ -296,7 +322,7 @@ private struct PainPointSheetView: View {
                 VStack(alignment: .leading, spacing: 16) {
                     Text("AIGC 剧本/分镜创作痛点")
                         .font(.title2.bold())
-                    Text("以下痛点来自一线创作需求，MultiGen 通过剧本、分镜与影像模块逐步解决。")
+                    Text("以下痛点来自一线创作需求，MultiGen 通过剧本与分镜模块逐步解决。")
                         .font(.callout)
                         .foregroundStyle(.secondary)
 

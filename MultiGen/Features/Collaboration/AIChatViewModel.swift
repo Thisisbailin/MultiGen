@@ -15,7 +15,20 @@ final class AIChatViewModel: ObservableObject {
     @Published private(set) var contextModeDescription: String = ""
     @Published private(set) var storyboardAssistantState: StoryboardAssistantDisplay = .init()
 
-    private let projectSummaryPromptText = "请基于 projectContext 中提供的资料生成一段 250-350 字的专业项目简介，强调核心卖点、主冲突以及视听/类型特色，并指出潜在受众。"
+    private let projectSummaryPromptText = """
+请阅读 projectContext 中提供的剧本全文（按集与场景顺序，仅包含项目名与剧本文本），返回 JSON 结构：
+{
+  "overview": "项目简介，100-300字，概括题材/类型、主冲突、叙事或视听特色、目标受众",
+  "tags": ["类型/风格标签，用简短词语，如科幻","都市","悬疑"],
+  "characters": [
+    {"name": "角色名", "role": "角色标签，如男主/女主/反派/配角", "profile": "人物设定（动机/人设/矛盾点等，简洁）"}
+  ],
+  "scenes": [
+    {"name": "场景名称", "description": "场景描述（含氛围/功能）", "episodes": [1,2]}
+  ]
+}
+要求：严格按上述字段输出有效 JSON；只列核心人物与关键场景；不要包含额外说明文字或 Markdown 代码块围栏。
+"""
     private let attachmentController = ChatAttachmentController()
 
     private var dependencies: AppDependencies?
@@ -23,7 +36,6 @@ final class AIChatViewModel: ObservableObject {
     private var promptLibraryStore: PromptLibraryStore?
     private var scriptStore: ScriptStore?
     private var storyboardStore: StoryboardStore?
-    private var imagingStore: ImagingStore?
     private var navigationStore: NavigationStore?
     private var contextCoordinator: ChatContextCoordinator?
     private var storyboardCoordinator: StoryboardGenerationCoordinator?
@@ -39,7 +51,6 @@ final class AIChatViewModel: ObservableObject {
         self.moduleOverride = moduleOverride
     }
 
-    var attachmentCount: Int { attachments.count }
     var canAddAttachments: Bool {
         guard currentModule.allowsAttachments else { return false }
         return attachmentController.remainingCapacity > 0
@@ -68,8 +79,7 @@ final class AIChatViewModel: ObservableObject {
         promptLibraryStore: PromptLibraryStore,
         navigationStore: NavigationStore,
         scriptStore: ScriptStore,
-        storyboardStore: StoryboardStore,
-        imagingStore: ImagingStore
+        storyboardStore: StoryboardStore
     ) {
         guard self.dependencies == nil else { return }
         self.dependencies = dependencies
@@ -78,7 +88,6 @@ final class AIChatViewModel: ObservableObject {
         self.navigationStore = navigationStore
         self.scriptStore = scriptStore
         self.storyboardStore = storyboardStore
-        self.imagingStore = imagingStore
         self.contextCoordinator = ChatContextCoordinator(
             navigationStore: navigationStore,
             scriptStore: scriptStore,
@@ -93,6 +102,7 @@ final class AIChatViewModel: ObservableObject {
         refreshModuleAndContext()
         switchThread(to: currentThreadIdentifier)
         processPendingProjectSummary()
+        processPendingPromptHelper()
         rebuildHistoryEntries()
         refreshStoryboardAssistantState()
     }
@@ -112,20 +122,9 @@ final class AIChatViewModel: ObservableObject {
         guard trimmed.isEmpty == false else { return }
         guard isSending == false else { return }
 
-        if navigationStore.selection == .image {
-            messages.append(AIChatMessage(role: .user, text: trimmed))
-            inputText = ""
-            errorMessage = nil
-            isSending = true
-            Task { [weak self] in
-                await self?.handleImagingRequest(prompt: trimmed)
-            }
-            return
-        }
-
         guard let coordinator = contextCoordinator else { return }
         let context = currentContext
-        let module = coordinator.promptModule(for: context)
+        let module = coordinator.promptModule(for: context, override: currentModule)
         let origin = originLabel(for: context)
         if currentModule == .storyboard {
             navigationStore.storyboardAutomationHandler?.recordSidebarInstruction(trimmed)
@@ -139,7 +138,8 @@ final class AIChatViewModel: ObservableObject {
             includeMemory: true
         ) else { return }
 
-        messages.append(AIChatMessage(role: .user, text: trimmed))
+        let userImages = attachments.map(\.preview)
+        messages.append(AIChatMessage(role: .user, text: trimmed, images: userImages))
         inputText = ""
         errorMessage = nil
         isSending = true
@@ -280,6 +280,25 @@ final class AIChatViewModel: ObservableObject {
         sendProjectSummary(project, context: context, module: .scriptProjectSummary)
     }
 
+    func processPendingPromptHelper() {
+        guard let navigationStore,
+              let scriptStore else { return }
+        guard let request = navigationStore.pendingPromptHelper else { return }
+        navigationStore.pendingPromptHelper = nil
+        guard let project = scriptStore.projects.first(where: { $0.id == request.projectID }) else {
+            errorMessage = "未找到项目，无法生成提示词"
+            return
+        }
+        let context: ChatContext = .general
+        let prompt = promptHelperPrompt(for: request, project: project)
+        guard prompt.isEmpty == false else {
+            errorMessage = "缺少必要信息，无法生成提示词"
+            return
+        }
+        let module: PromptDocument.Module = .promptHelperCharacterScene
+        sendPromptHelper(prompt: prompt, context: context, project: project, request: request, module: module)
+    }
+
     func handleMemoryToggle(enabled: Bool) {
         if enabled {
             switchThread(to: currentThreadIdentifier)
@@ -311,6 +330,10 @@ final class AIChatViewModel: ObservableObject {
             .sink { [weak self] _ in self?.handleNavigationUpdate() }
             .store(in: &cancellables)
 
+        navigationStore.$currentScriptProjectID
+            .sink { [weak self] _ in self?.handleNavigationUpdate() }
+            .store(in: &cancellables)
+
         navigationStore.$currentScriptEpisodeID
             .sink { [weak self] _ in self?.handleNavigationUpdate() }
             .store(in: &cancellables)
@@ -327,8 +350,30 @@ final class AIChatViewModel: ObservableObject {
             .sink { [weak self] _ in self?.handleNavigationUpdate() }
             .store(in: &cancellables)
 
+        navigationStore.$currentLibraryCharacterID
+            .sink { [weak self] _ in self?.handleNavigationUpdate() }
+            .store(in: &cancellables)
+
+        navigationStore.$currentLibrarySceneID
+            .sink { [weak self] _ in self?.handleNavigationUpdate() }
+            .store(in: &cancellables)
+
         navigationStore.$pendingProjectSummaryID
-            .sink { [weak self] _ in self?.processPendingProjectSummary() }
+            .receive(on: RunLoop.main)
+            .sink { [weak self] _ in
+                Task { @MainActor [weak self] in
+                    self?.processPendingProjectSummary()
+                }
+            }
+            .store(in: &cancellables)
+
+        navigationStore.$pendingPromptHelper
+            .receive(on: RunLoop.main)
+            .sink { [weak self] _ in
+                Task { @MainActor [weak self] in
+                    self?.processPendingPromptHelper()
+                }
+            }
             .store(in: &cancellables)
 
         navigationStore.$pendingAIChatSystemMessage
@@ -393,6 +438,12 @@ final class AIChatViewModel: ObservableObject {
 
         Task { [weak self] in
             guard let self else { return }
+            guard let actionCenter = self.actionCenter else {
+                await MainActor.run {
+                    self.errorMessage = "AI 中枢尚未就绪，稍后再试。"
+                }
+                return
+            }
             guard let request = self.makeChatActionRequest(
                 prompt: self.projectSummaryPromptText,
                 context: context,
@@ -403,7 +454,7 @@ final class AIChatViewModel: ObservableObject {
             self.messages.append(AIChatMessage(role: .assistant, text: "（正在生成...）", detail: nil))
             let placeholderID = self.messages.last!.id
             do {
-                let pipeline = AIChatStreamingPipeline(actionCenter: self.actionCenter!)
+                let pipeline = AIChatStreamingPipeline(actionCenter: actionCenter)
                 let outcome = try await pipeline.run(request: request) { partial in
                     if let idx = self.messages.firstIndex(where: { $0.id == placeholderID }) {
                         self.messages[idx] = AIChatMessage(id: placeholderID, role: .assistant, text: partial)
@@ -412,7 +463,9 @@ final class AIChatViewModel: ObservableObject {
                 if let result = outcome.result {
                     self.handleAIResponse(result: result, context: context, targetMessageID: placeholderID)
                     let finalText = (result.text ?? outcome.collectedText).trimmingCharacters(in: .whitespacesAndNewlines)
-                    if finalText.isEmpty == false {
+                    if let payload = self.parseProjectPayload(from: finalText) {
+                        await self.applyProjectPayload(payload, project: project)
+                    } else if finalText.isEmpty == false {
                         await self.persistProjectSummary(finalText, project: project)
                     }
                 } else if let idx = self.messages.firstIndex(where: { $0.id == placeholderID }) {
@@ -423,6 +476,67 @@ final class AIChatViewModel: ObservableObject {
             }
             self.isSending = false
             self.pendingSummaryMessageID = nil
+        }
+    }
+
+    private func sendPromptHelper(
+        prompt: String,
+        context: ChatContext,
+        project: ScriptProject,
+        request: PromptHelperRequest,
+        module: PromptDocument.Module
+    ) {
+        guard isSending == false else { return }
+        isSending = true
+        errorMessage = nil
+        let targetLabel = request.target == .character ? "角色" : "场景"
+        messages.append(AIChatMessage(role: .system, text: "正在生成\(targetLabel)提示词…"))
+
+        Task { [weak self] in
+            guard let self else { return }
+            guard let actionCenter = self.actionCenter else {
+                await MainActor.run {
+                    self.errorMessage = "AI 中枢尚未就绪，稍后再试。"
+                    self.isSending = false
+                }
+                return
+            }
+            guard let chatRequest = self.makeChatActionRequest(
+                prompt: prompt,
+                context: context,
+                module: module,
+                kind: .diagnostics,
+                origin: "提示词助手"
+            ) else {
+                await MainActor.run { self.isSending = false }
+                return
+            }
+            self.messages.append(AIChatMessage(role: .assistant, text: "（正在生成...）", detail: nil))
+            let placeholderID = self.messages.last?.id
+            do {
+                let pipeline = AIChatStreamingPipeline(actionCenter: actionCenter)
+                let outcome = try await pipeline.run(request: chatRequest) { partial in
+                    if let id = placeholderID,
+                       let index = self.messages.firstIndex(where: { $0.id == id }) {
+                        self.messages[index] = AIChatMessage(id: id, role: .assistant, text: partial)
+                    }
+                }
+                if let result = outcome.result {
+                    self.handleAIResponse(result: result, context: context, targetMessageID: placeholderID)
+                    let finalText = (result.text ?? outcome.collectedText).trimmingCharacters(in: .whitespacesAndNewlines)
+                    if finalText.isEmpty == false {
+                        await self.applyPromptHelperResult(finalText, request: request)
+                    }
+                } else if let id = placeholderID,
+                          let index = self.messages.firstIndex(where: { $0.id == id }) {
+                    self.messages[index] = AIChatMessage(id: id, role: .assistant, text: outcome.collectedText)
+                }
+            } catch {
+                await MainActor.run {
+                    self.errorMessage = "生成失败：\(error.localizedDescription)"
+                }
+            }
+            await MainActor.run { self.isSending = false }
         }
     }
 
@@ -452,25 +566,6 @@ final class AIChatViewModel: ObservableObject {
         }
         attachmentController.reset()
         isSending = false
-    }
-
-    private func handleImagingRequest(prompt: String) async {
-        guard let actionCenter,
-              let dependencies,
-              let navigationStore,
-              let imagingStore else { return }
-        let payloads = attachments.map { $0.payload }
-        await imagingStore.generateImage(
-            prompt: prompt,
-            attachments: payloads,
-            actionCenter: actionCenter,
-            dependencies: dependencies,
-            navigationStore: navigationStore,
-            summary: "影像模块 · \(imagingStore.selectedSegment.title)"
-        )
-        attachmentController.reset()
-        isSending = false
-        persistThreadIfNeeded()
     }
 
     private var currentThreadIdentifier: ChatThreadKey {
@@ -513,20 +608,38 @@ final class AIChatViewModel: ObservableObject {
         Model: \(result.metadata.model)
         Duration: \(result.metadata.duration)s
         """
+        var images: [NSImage] = []
+        if let image = result.image {
+            images.append(image)
+        } else if let base64 = result.imageBase64,
+                  let data = Data(base64Encoded: base64),
+                  let img = NSImage(data: data) {
+            images.append(img)
+        }
+
+        var cleanedText = result.text ?? "(无文本输出)"
+        if images.isEmpty {
+            if let inline = extractInlineImage(from: cleanedText) {
+                images.append(inline.image)
+                cleanedText = inline.cleanedText
+            }
+        }
         if let targetMessageID,
            let index = messages.firstIndex(where: { $0.id == targetMessageID }) {
             messages[index] = AIChatMessage(
                 id: targetMessageID,
                 role: .assistant,
-                text: result.text ?? "(无文本输出)",
-                detail: detail
+                text: cleanedText,
+                detail: detail,
+                images: images
             )
         } else {
             messages.append(
                 AIChatMessage(
                     role: .assistant,
-                    text: result.text ?? "(无文本输出)",
-                    detail: detail
+                    text: cleanedText,
+                    detail: detail,
+                    images: images
                 )
             )
         }
@@ -536,13 +649,183 @@ final class AIChatViewModel: ObservableObject {
         }
     }
 
+    private func extractInlineImage(from text: String) -> (image: NSImage, cleanedText: String)? {
+        guard let range = text.range(of: "data:image") else { return nil }
+        let substring = String(text[range.lowerBound...])
+        guard let comma = substring.firstIndex(of: ",") else { return nil }
+        let base64Part = String(substring[substring.index(after: comma)...])
+        guard let data = Data(base64Encoded: base64Part),
+              let img = NSImage(data: data) else { return nil }
+        let cleaned = text.replacingOccurrences(of: substring, with: "").trimmingCharacters(in: .whitespacesAndNewlines)
+        return (img, cleaned.isEmpty ? "(见图片)" : cleaned)
+    }
+
     private func persistProjectSummary(_ summary: String, project: ScriptProject) async {
         await MainActor.run {
             scriptStore?.updateProject(id: project.id) { editable in
-                editable.synopsis = summary
+                if editable.synopsis.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                    editable.synopsis = summary
+                }
             }
             navigationStore?.pendingAIChatSystemMessage = "项目《\(project.title)》简介已更新。"
         }
+    }
+
+    private func applyProjectPayload(_ payload: ProjectSummaryPayload, project: ScriptProject) async {
+        await MainActor.run {
+            scriptStore?.updateProject(id: project.id) { editable in
+                let cleanedOverview = payload.overview?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+                editable.synopsis = cleanedOverview.isEmpty ? editable.synopsis : cleanedOverview
+
+                if let tags = payload.tags {
+                    let cleaned = tags
+                        .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+                        .filter { $0.isEmpty == false }
+                    editable.tags = Array(Set(cleaned))
+                }
+
+                if let characters = payload.characters {
+                    let mapped = characters.compactMap { item -> ProjectCharacterProfile? in
+                        let name = item.name.trimmingCharacters(in: .whitespacesAndNewlines)
+                        guard name.isEmpty == false else { return nil }
+                        let role = item.role?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+                        let profile = item.profile?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+                        let description = [role, profile].filter { $0.isEmpty == false }.joined(separator: "｜")
+                        return ProjectCharacterProfile(name: name, description: description)
+                    }
+                    editable.mainCharacters = mapped
+                }
+
+                if let scenes = payload.scenes {
+                    let mapped = scenes.compactMap { item -> ProjectSceneProfile? in
+                        let name = item.name.trimmingCharacters(in: .whitespacesAndNewlines)
+                        guard name.isEmpty == false else { return nil }
+                        var descriptionParts: [String] = []
+                        if let desc = item.description?.trimmingCharacters(in: .whitespacesAndNewlines), desc.isEmpty == false {
+                            descriptionParts.append(desc)
+                        }
+                        if let episodes = item.episodes, episodes.isEmpty == false {
+                            let epText = episodes.map(String.init).joined(separator: ", ")
+                            descriptionParts.append("出现集数：\(epText)")
+                        }
+                        let description = descriptionParts.isEmpty ? "AI 生成" : descriptionParts.joined(separator: "｜")
+                        return ProjectSceneProfile(name: name, description: description)
+                    }
+                    editable.keyScenes = mapped
+                }
+            }
+
+            guard let project = scriptStore?.projects.first(where: { $0.id == project.id }) else { return }
+            let overviewApplied = project.synopsis.isEmpty == false
+            navigationStore?.pendingAIChatSystemMessage = "项目《\(project.title)》AI 元信息已写入：简介\(overviewApplied ? "√" : "未写入")，标签\(project.tags.count)个，人物\(project.mainCharacters.count)个，场景\(project.keyScenes.count)个。"
+        }
+    }
+
+    private func parseProjectPayload(from text: String) -> ProjectSummaryPayload? {
+        guard let jsonText = extractJSON(from: text),
+              let data = jsonText.data(using: .utf8) else { return nil }
+        let decoder = JSONDecoder()
+        return try? decoder.decode(ProjectSummaryPayload.self, from: data)
+    }
+
+    private func promptHelperPrompt(for request: PromptHelperRequest, project: ScriptProject) -> String {
+        switch request.target {
+        case .character:
+            guard let character = project.mainCharacters.first(where: { $0.id == request.targetID }) else { return "" }
+            let name = character.name.trimmingCharacters(in: .whitespacesAndNewlines)
+            let description = character.description.trimmingCharacters(in: .whitespacesAndNewlines)
+            let existing = character.prompt.trimmingCharacters(in: .whitespacesAndNewlines)
+            var lines: [String] = [
+                "根据以下角色信息生成一条中文文生图提示词，便于在专业生图平台直接使用。",
+                "仅输出提示词正文，不要附加解释、列表或代码块。",
+                "",
+                "角色：\(name.isEmpty ? "未命名角色" : name)"
+            ]
+            if description.isEmpty == false {
+                lines.append("设定：\(description)")
+            }
+            if existing.isEmpty == false {
+                lines.append("已有提示词（可在此基础上优化）：\(existing)")
+            }
+            lines.append("请突出外观、服饰、材质、气质、姿态、光线与镜头感，保持戏剧张力。")
+            return lines.joined(separator: "\n")
+        case .scene:
+            guard let scene = project.keyScenes.first(where: { $0.id == request.targetID }) else { return "" }
+            let name = scene.name.trimmingCharacters(in: .whitespacesAndNewlines)
+            let description = scene.description.trimmingCharacters(in: .whitespacesAndNewlines)
+            let existing = scene.prompt.trimmingCharacters(in: .whitespacesAndNewlines)
+            var lines: [String] = [
+                "根据下述场景信息生成一条中文文生图提示词，便于在专业生图平台直接使用。",
+                "仅输出提示词正文，不要附加解释、列表或代码块。",
+                "",
+                "场景：\(name.isEmpty ? "未命名场景" : name)"
+            ]
+            if description.isEmpty == false {
+                lines.append("设定：\(description)")
+            }
+            if existing.isEmpty == false {
+                lines.append("已有提示词（可在此基础上优化）：\(existing)")
+            }
+            lines.append("请描述空间/景别/光线/时间/色调/氛围与关键道具，保持戏剧张力。")
+            return lines.joined(separator: "\n")
+        }
+    }
+
+    private func applyPromptHelperResult(_ text: String, request: PromptHelperRequest) async {
+        let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard trimmed.isEmpty == false else { return }
+        await MainActor.run {
+            scriptStore?.updateProject(id: request.projectID) { editable in
+                switch request.target {
+                case .character:
+                    if let idx = editable.mainCharacters.firstIndex(where: { $0.id == request.targetID }) {
+                        if editable.mainCharacters[idx].variants.isEmpty {
+                            editable.mainCharacters[idx].variants = [CharacterVariant(label: "默认形态", promptOverride: trimmed, images: [])]
+                        } else {
+                            editable.mainCharacters[idx].variants[0].promptOverride = trimmed
+                        }
+                        editable.mainCharacters[idx].prompt = trimmed
+                    }
+                case .scene:
+                    if let idx = editable.keyScenes.firstIndex(where: { $0.id == request.targetID }) {
+                            if editable.keyScenes[idx].variants.isEmpty {
+                                editable.keyScenes[idx].variants = [SceneVariant(label: "默认视角", promptOverride: trimmed, images: [])]
+                            } else {
+                                editable.keyScenes[idx].variants[0].promptOverride = trimmed
+                            }
+                            editable.keyScenes[idx].prompt = trimmed
+                    }
+                }
+            }
+
+            if let project = scriptStore?.projects.first(where: { $0.id == request.projectID }) {
+                let label = targetName(for: request, in: project)
+                navigationStore?.pendingAIChatSystemMessage = "提示词已写入：\(label)"
+            }
+        }
+    }
+
+    private func targetName(for request: PromptHelperRequest, in project: ScriptProject) -> String {
+        switch request.target {
+        case .character:
+            if let character = project.mainCharacters.first(where: { $0.id == request.targetID }) {
+                let name = character.name.trimmingCharacters(in: .whitespacesAndNewlines)
+                return name.isEmpty ? "角色" : "角色「\(name)」"
+            }
+            return "角色"
+        case .scene:
+            if let scene = project.keyScenes.first(where: { $0.id == request.targetID }) {
+                let name = scene.name.trimmingCharacters(in: .whitespacesAndNewlines)
+                return name.isEmpty ? "场景" : "场景「\(name)」"
+            }
+            return "场景"
+        }
+    }
+
+    private func extractJSON(from text: String) -> String? {
+        guard let start = text.firstIndex(of: "{"),
+              let end = text.lastIndex(of: "}") else { return nil }
+        return String(text[start...end])
     }
 
     private func makeChatActionRequest(
@@ -590,11 +873,65 @@ final class AIChatViewModel: ObservableObject {
             fields["imageAttachmentCount"] = "\(attachments.count)"
             for (index, attachment) in attachments.enumerated() {
                 let key = "imageAttachment\(index + 1)"
+                let plain = attachment.base64String
+                let uri = dataURI(for: attachment)
                 fields["\(key)FileName"] = attachment.fileName
-                fields["\(key)Base64"] = attachment.base64String
+                fields["\(key)Base64"] = plain
+                fields["\(key)DataURI"] = uri
+            }
+            // 为兼容多模态模型，附加首图的通用字段
+            if let first = attachments.first {
+                let plain = first.base64String
+                let uri = dataURI(for: first)
+                fields["imageBase64"] = plain
+                fields["image_base64"] = plain
+                fields["image_url"] = uri
+                fields["image_mime"] = mimeType(for: first.fileName)
+            }
+            // 通用 JSON 载荷，兼容常见多模态接口（OpenAI/Google/Baidu 等）
+            let attachmentPayload = attachments.map { attachment in
+                [
+                    "fileName": attachment.fileName,
+                    "mime": mimeType(for: attachment.fileName),
+                    "base64": attachment.base64String,
+                    "dataURI": dataURI(for: attachment)
+                ]
+            }
+            if let json = try? JSONSerialization.data(withJSONObject: attachmentPayload, options: []),
+               let jsonString = String(data: json, encoding: .utf8) {
+                fields["images_json"] = jsonString
+            }
+            // OpenAI 样式 content 字段（messages[0]）
+            if let first = attachments.first {
+                let openAIContent: [[String: Any]] = [
+                    ["type": "text", "text": prompt],
+                    ["type": "image_url", "image_url": ["url": dataURI(for: first)]]
+                ]
+                if let data = try? JSONSerialization.data(withJSONObject: openAIContent, options: []),
+                   let text = String(data: data, encoding: .utf8) {
+                    fields["openai_content"] = text
+                }
             }
         }
         return fields
+    }
+
+    private func dataURI(for attachment: ImageAttachment) -> String {
+        let mime = mimeType(for: attachment.fileName)
+        return "data:\(mime);base64,\(attachment.base64String)"
+    }
+
+    private func mimeType(for filename: String) -> String {
+        let ext = URL(fileURLWithPath: filename).pathExtension.lowercased()
+        switch ext {
+        case "jpg", "jpeg": return "image/jpeg"
+        case "png": return "image/png"
+        case "gif": return "image/gif"
+        case "tiff", "tif": return "image/tiff"
+        case "bmp": return "image/bmp"
+        case "heic": return "image/heic"
+        default: return "application/octet-stream"
+        }
     }
 
     private func makeMemoryContext(maxMessages: Int = 8) -> String? {
@@ -669,6 +1006,9 @@ final class AIChatViewModel: ObservableObject {
     }
 
     private func originLabel(for context: ChatContext) -> String {
+        if currentModule == .promptHelper {
+            return "提示词助手"
+        }
         switch context {
         case .general:
             return "智能协同"

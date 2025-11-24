@@ -34,8 +34,6 @@ struct StoryboardResponseParser {
         var dialog: String?
         var os: String?
         var narration: String?
-        var aiPrompt: String?
-        var prompt: String?
         var description: String?
         var visualSummary: String?
         var soundDesign: String?
@@ -46,7 +44,6 @@ struct StoryboardResponseParser {
             let movementValue = cameraMovement ?? camera ?? movement ?? ""
             let durationValue = duration ?? time ?? ""
             let dialogueValue = dialogueOrOS ?? dialogue ?? dialog ?? os ?? narration ?? ""
-            let promptValue = aiPrompt ?? prompt ?? ""
             let visualValue = visualSummary ?? description ?? ""
             let soundValue = soundDesign ?? ""
 
@@ -56,7 +53,7 @@ struct StoryboardResponseParser {
                 cameraMovement: movementValue,
                 duration: durationValue,
                 dialogueOrOS: dialogueValue,
-                aiPrompt: promptValue,
+                aiPrompt: "",
                 visualSummary: visualValue,
                 soundDesign: soundValue
             )
@@ -97,7 +94,7 @@ struct StoryboardResponseParser {
     }
 
     static let responseFormatHint = """
-    请以 JSON 输出，推荐结构：{"scenes":[{"sceneId":"<提供的 sceneId>","sceneTitle":"场景标题","sceneSummary":"摘要","shots":[{"shotNumber":1,"shotScale":"中景","cameraMovement":"推镜","duration":"4s","dialogueOrOS":"……","aiPrompt":"……","visualSummary":"……","soundDesign":"……"}]}]}。如仅生成单个场景，也可直接输出 {"entries":[...]}。
+    请以 JSON 输出，推荐结构：{"scenes":[{"sceneId":"<提供的 sceneId>","sceneTitle":"场景标题","sceneSummary":"摘要","shots":[{"shotNumber":1,"shotScale":"中景","cameraMovement":"推镜","duration":"4s","dialogueOrOS":"……","visualSummary":"……","soundDesign":"……"}]}]}。如仅生成单个场景，也可直接输出 {"entries":[...]}。
     """
 
     func parseEntries(from text: String, nextShotNumber: Int) -> [ParsedStoryboardEntry] {

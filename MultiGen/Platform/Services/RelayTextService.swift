@@ -68,15 +68,16 @@ final class RelayTextService: AITextServiceProtocol {
         let decoder = JSONDecoder()
         decoder.keyDecodingStrategy = .convertFromSnakeCase
         guard let result = try? decoder.decode(RelayChatResponse.self, from: data),
-              let text = result.choices.first?.message.content else {
+              let message = result.choices.first?.message else {
             throw AIServiceError.decodingFailed
         }
+        let text = message.contentText
 
         if let usage = result.usage {
             print("[RelayTextService] Usage -> prompt: \(usage.promptTokens ?? 0), completion: \(usage.completionTokens ?? 0), total: \(usage.totalTokens ?? 0)")
         }
 
-        let imageURLString = result.choices.first?.message.images?.compactMap { $0.imageURL?.url }.first
+        let imageURLString = message.firstImageURL
         let parsedImage = Self.parseImageURL(imageURLString)
 
         let metadata = SceneJobResult.Metadata(
@@ -250,8 +251,36 @@ private struct RelayChatRequest: Encodable {
 private struct RelayChatResponse: Decodable {
     struct Choice: Decodable {
         struct Message: Decodable {
-            let content: String
-            let images: [ImagePayload]?
+            let contentText: String
+            let explicitImages: [ImagePayload]?
+            let contentImages: [ImagePayload]
+
+            var firstImageURL: String? {
+                (explicitImages ?? []).first?.imageURL?.url ?? contentImages.first?.imageURL?.url
+            }
+
+            init(from decoder: Decoder) throws {
+                let container = try decoder.container(keyedBy: CodingKeys.self)
+
+                // content 既可能是字符串，也可能是数组（text/image_url 混合）
+                if let text = try? container.decode(String.self, forKey: .content) {
+                    contentText = text
+                    contentImages = []
+                } else if let parts = try? container.decode([ContentPart].self, forKey: .content) {
+                    contentText = parts.compactMap { $0.text }.joined()
+                    contentImages = parts.compactMap { $0.imagePayload }
+                } else {
+                    contentText = ""
+                    contentImages = []
+                }
+
+                explicitImages = try? container.decodeIfPresent([ImagePayload].self, forKey: .images)
+            }
+
+            enum CodingKeys: String, CodingKey {
+                case content
+                case images
+            }
         }
         let message: Message
     }
@@ -270,10 +299,47 @@ private struct RelayChatResponse: Decodable {
 private struct ImagePayload: Decodable {
     struct ImageURL: Decodable {
         let url: String?
+
+        init(from decoder: Decoder) throws {
+            if let single = try? decoder.singleValueContainer(),
+               let string = try? single.decode(String.self) {
+                url = string
+                return
+            }
+            let container = try decoder.container(keyedBy: CodingKeys.self)
+            url = try container.decodeIfPresent(String.self, forKey: .url)
+        }
+
+        private enum CodingKeys: String, CodingKey {
+            case url
+        }
     }
     let type: String?
     let index: Int?
     let imageURL: ImageURL?
+
+    enum CodingKeys: String, CodingKey {
+        case type
+        case index
+        case imageURL = "image_url"
+    }
+}
+
+private struct ContentPart: Decodable {
+    let type: String?
+    let text: String?
+    let imageURL: ImagePayload.ImageURL?
+
+    var imagePayload: ImagePayload? {
+        guard let imageURL else { return nil }
+        return ImagePayload(type: type, index: nil, imageURL: imageURL)
+    }
+
+    enum CodingKeys: String, CodingKey {
+        case type
+        case text
+        case imageURL = "image_url"
+    }
 }
 
 private struct RelayChatStreamChunk: Decodable {

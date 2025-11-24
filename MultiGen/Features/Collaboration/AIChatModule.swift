@@ -4,7 +4,8 @@ enum AIChatModule: String, Equatable, CaseIterable {
     case general
     case script
     case storyboard
-    case imaging
+    case promptHelper
+    case promptHelperStyle
 
     static func resolve(selection: SidebarItem, context: ChatContext) -> AIChatModule {
         switch selection {
@@ -12,22 +13,29 @@ enum AIChatModule: String, Equatable, CaseIterable {
             return .script
         case .storyboard:
             return .storyboard
-        case .image:
-            return .imaging
+        case .libraryStyles, .libraryCharacters, .libraryScenes, .libraryPrompts:
+            return selection == .libraryStyles ? .promptHelperStyle : .promptHelper
         default:
             switch context {
             case .script, .scriptProject:
                 return .script
             case .storyboard:
                 return .storyboard
-            default:
+            case .general:
                 return .general
+            default:
+                return .promptHelper
             }
         }
     }
 
     var allowsAttachments: Bool {
-        self == .imaging
+        switch self {
+        case .general, .promptHelperStyle, .promptHelper:
+            return true
+        case .script, .storyboard:
+            return false
+        }
     }
 
     var displayName: String {
@@ -38,8 +46,10 @@ enum AIChatModule: String, Equatable, CaseIterable {
             return "剧本助手"
         case .storyboard:
             return "分镜助手"
-        case .imaging:
-            return "影像助手"
+        case .promptHelper:
+            return "提示词助手"
+        case .promptHelperStyle:
+            return "风格助手"
         }
     }
 

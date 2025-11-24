@@ -31,6 +31,11 @@ final class ChatContextCoordinator {
                 let snapshot = navigationStore.currentStoryboardSceneSnapshot
                 return .storyboard(project: project, episode: episode, scene: scene, snapshot: snapshot, workspace: workspace)
             }
+        case .libraryStyles, .libraryCharacters, .libraryScenes, .libraryPrompts:
+            if let projectID = navigationStore.currentScriptProjectID,
+               let project = projectByID(projectID) {
+                return .scriptProject(project: project)
+            }
         default:
             break
         }
@@ -42,7 +47,21 @@ final class ChatContextCoordinator {
         return AIChatModule.resolve(selection: navigationStore.selection, context: context)
     }
 
-    func promptModule(for context: ChatContext) -> PromptDocument.Module {
+    func promptModule(for context: ChatContext, override: AIChatModule? = nil) -> PromptDocument.Module {
+        if let override {
+            switch override {
+            case .general:
+                return .aiConsole
+            case .script:
+                return .script
+            case .storyboard:
+                return .storyboard
+            case .promptHelper:
+                return promptHelperModule()
+            case .promptHelperStyle:
+                return .promptHelperStyle
+            }
+        }
         switch context {
         case .general:
             return .aiConsole
@@ -55,6 +74,17 @@ final class ChatContextCoordinator {
         }
     }
 
+    private func promptHelperModule() -> PromptDocument.Module {
+        switch navigationStore.selection {
+        case .libraryStyles:
+            return .promptHelperStyle
+        case .libraryCharacters, .libraryScenes:
+            return .promptHelperCharacterScene
+        default:
+            return .promptHelperCharacterScene
+        }
+    }
+
     func statusDescription(for context: ChatContext) -> String {
         switch context {
         case .general:
@@ -63,6 +93,14 @@ final class ChatContextCoordinator {
                 return "上下文：剧本 · 列表"
             case .storyboard:
                 return "上下文：分镜 · 列表"
+            case .libraryStyles:
+                return "上下文：提示词助手 · 风格库"
+            case .libraryCharacters:
+                return "上下文：提示词助手 · 角色库"
+            case .libraryScenes:
+                return "上下文：提示词助手 · 场景库"
+            case .libraryPrompts:
+                return "上下文：提示词助手 · 指令库"
             default:
                 return "上下文：主页聊天"
             }
@@ -77,7 +115,15 @@ final class ChatContextCoordinator {
             base += " · \(count) 镜头"
             return base
         case .scriptProject(let project):
-            return "上下文：项目 · \(project.title)"
+            let base = defaultedProjectTitle(project)
+            switch navigationStore.selection {
+            case .libraryCharacters:
+                return "上下文：提示词助手 · 角色 · \(base)"
+            case .libraryScenes:
+                return "上下文：提示词助手 · 场景 · \(base)"
+            default:
+                return "上下文：项目 · \(project.title)"
+            }
         }
     }
 
@@ -94,7 +140,17 @@ final class ChatContextCoordinator {
             }
             return base
         case .scriptProject(let project):
-            return "模式：项目总结 · \(project.title)"
+            let base = defaultedProjectTitle(project)
+            switch navigationStore.selection {
+            case .libraryStyles:
+                return "模式：提示词助手 · 风格库 · \(base)"
+            case .libraryCharacters, .libraryScenes:
+                return "模式：提示词助手 · \(base)"
+            case .libraryPrompts:
+                return "模式：提示词助手 · 指令库"
+            default:
+                return "模式：项目总结 · \(project.title)"
+            }
         }
     }
 
@@ -135,9 +191,6 @@ final class ChatContextCoordinator {
     }
 
     func threadIdentifier(for context: ChatContext) -> ChatThreadKey {
-        if navigationStore.selection == .image {
-            return .image
-        }
         switch context {
         case .general:
             return .general
@@ -149,6 +202,18 @@ final class ChatContextCoordinator {
             }
             return .storyboard(episode.id)
         case .scriptProject(let project):
+            switch navigationStore.selection {
+            case .libraryCharacters:
+                if let targetID = navigationStore.currentLibraryCharacterID {
+                    return .promptHelper(projectID: project.id, targetID: targetID)
+                }
+            case .libraryScenes:
+                if let targetID = navigationStore.currentLibrarySceneID {
+                    return .promptHelper(projectID: project.id, targetID: targetID)
+                }
+            default:
+                break
+            }
             return .project(project.id)
         }
     }
@@ -180,8 +245,6 @@ final class ChatContextCoordinator {
         switch key {
         case .general:
             return "通用对话"
-        case .image:
-            return "影像助手"
         case .scriptEpisode(let episodeID):
             if let episode = scriptEpisode(for: episodeID) {
                 let projectTitle = defaultedProjectTitle(project(for: episode.id))
@@ -204,6 +267,15 @@ final class ChatContextCoordinator {
                 return "\(finalTitle) · 项目总结"
             }
             return "项目总结"
+        case .promptHelper(let projectID, let targetID):
+            let projectTitle = defaultedProjectTitle(projectByID(projectID))
+            if let character = projectByID(projectID)?.mainCharacters.first(where: { $0.id == targetID }) {
+                return "\(projectTitle) · 角色 · \(character.name)"
+            }
+            if let scene = projectByID(projectID)?.keyScenes.first(where: { $0.id == targetID }) {
+                return "\(projectTitle) · 场景 · \(scene.name)"
+            }
+            return "\(projectTitle) · 提示词助手"
         }
     }
 
@@ -215,8 +287,8 @@ final class ChatContextCoordinator {
             return .script
         case .storyboard:
             return .storyboard
-        case .image:
-            return .imaging
+        case .promptHelper:
+            return .promptHelper
         }
     }
 

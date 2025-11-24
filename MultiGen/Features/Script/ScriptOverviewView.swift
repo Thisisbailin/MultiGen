@@ -1,4 +1,5 @@
 import SwiftUI
+import UniformTypeIdentifiers
 
 struct ScriptOverviewView: View {
     @ObservedObject var store: ScriptStore
@@ -45,7 +46,7 @@ struct ScriptOverviewView: View {
         VStack(alignment: .leading, spacing: 4) {
             Text("剧本项目")
                 .font(.system(.largeTitle, weight: .bold))
-            Text("以项目为单位管理集数与元信息，便于后续分镜和影像创作。")
+            Text("以项目为单位管理集数与元信息，便于后续分镜落地和资产生成。")
                 .foregroundStyle(.secondary)
         }
     }
@@ -392,6 +393,33 @@ struct ProjectInfoPanel: View {
             }
 
             VStack(alignment: .leading, spacing: 10) {
+                Text("分集大纲")
+                    .font(.headline)
+                if project.episodeOutlines.isEmpty {
+                    Text("尚未导入分集大纲")
+                        .foregroundStyle(.secondary)
+                } else {
+                    VStack(spacing: 10) {
+                        ForEach(project.episodeOutlines.sorted(by: { $0.episodeNumber < $1.episodeNumber })) { outline in
+                            VStack(alignment: .leading, spacing: 4) {
+                                Text(outline.title.isEmpty ? "第\(outline.episodeNumber)集" : outline.title)
+                                    .font(.subheadline.bold())
+                                Text(outline.summary)
+                                    .font(.callout)
+                                    .foregroundStyle(.secondary)
+                                    .frame(maxWidth: .infinity, alignment: .leading)
+                            }
+                            .padding(10)
+                            .background(
+                                RoundedRectangle(cornerRadius: 10, style: .continuous)
+                                    .fill(Color(nsColor: .underPageBackgroundColor))
+                            )
+                        }
+                    }
+                }
+            }
+
+            VStack(alignment: .leading, spacing: 10) {
                 Text("主要场景")
                     .font(.headline)
                 if project.keyScenes.isEmpty {
@@ -576,79 +604,229 @@ struct TagChip: View {
 
 struct PersonaCard: View {
     let character: ProjectCharacterProfile
+    var onTap: (() -> Void)? = nil
+    @State private var isExpanded = false
+
+    private var coverImage: NSImage? {
+        guard let data = character.primaryImageData else { return nil }
+        return NSImage(data: data)
+    }
+
+    private var variantBadge: String {
+        let variantCount = character.variants.count
+        let imageCount = character.variants.flatMap { $0.images }.count
+        return "\(variantCount) 形态｜\(imageCount) 图"
+    }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            HStack(spacing: 8) {
-                Circle()
-                    .fill(Color.accentColor.opacity(0.3))
-                    .frame(width: 44, height: 44)
-                    .overlay(
-                        Text(String(character.name.prefix(1)).uppercased())
-                            .font(.headline)
-                    )
-                VStack(alignment: .leading, spacing: 4) {
-                    Text(character.name.isEmpty ? "未命名角色" : character.name)
-                        .font(.headline)
+        ZStack(alignment: .bottomLeading) {
+            if let image = coverImage {
+                Image(nsImage: image)
+                    .resizable()
+                    .scaledToFill()
+                    .frame(width: 220, height: 280)
+                    .clipped()
+            } else {
+                ZStack {
+                    Rectangle()
+                        .fill(Color.accentColor.opacity(0.12))
+                    VStack(spacing: 6) {
+                        Image(systemName: "person.crop.square")
+                            .font(.title)
+                        Text("未上传封面")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
+                }
+                .frame(width: 220, height: 280)
+            }
+
+            LinearGradient(
+                colors: [Color.black.opacity(0.5), Color.black.opacity(0.1)],
+                startPoint: .bottom,
+                endPoint: .top
+            )
+            .frame(height: 110)
+            .frame(maxWidth: .infinity, alignment: .bottom)
+            .allowsHitTesting(false)
+
+            VStack(alignment: .leading, spacing: 6) {
+                Text(character.name.isEmpty ? "未命名角色" : character.name)
+                    .font(.headline)
+                    .foregroundStyle(.white)
+                Text(variantBadge)
+                    .font(.caption2)
+                    .foregroundStyle(.white.opacity(0.9))
+                if isExpanded {
                     Text(character.description.isEmpty ? "暂无简介" : character.description)
                         .font(.caption)
-                        .foregroundStyle(.secondary)
-                        .lineLimit(2)
+                        .foregroundStyle(.white.opacity(0.9))
+                        .lineLimit(3)
+                }
+            }
+            .padding(14)
+        }
+        .frame(width: 220, height: 280)
+        .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
+        .shadow(color: .black.opacity(0.12), radius: 12, y: 8)
+        .contentShape(Rectangle())
+        .onTapGesture {
+            if let onTap {
+                onTap()
+            } else {
+                withAnimation(.easeInOut(duration: 0.2)) {
+                    isExpanded.toggle()
                 }
             }
         }
-        .padding(12)
-        .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 14))
     }
 }
 
 struct SceneCard: View {
     let scene: ProjectSceneProfile
+    var onTap: (() -> Void)? = nil
+    @State private var isExpanded = false
+
+    private var coverImage: NSImage? {
+        guard let data = scene.primaryImageData else { return nil }
+        return NSImage(data: data)
+    }
+
+    private var variantBadge: String {
+        let variantCount = scene.variants.count
+        let imageCount = scene.variants.flatMap { $0.images }.count
+        return "\(variantCount) 视角｜\(imageCount) 图"
+    }
 
     var body: some View {
-        HStack(spacing: 12) {
-            RoundedRectangle(cornerRadius: 12)
-                .fill(Color.blue.opacity(0.1))
-                .frame(width: 60, height: 60)
-                .overlay(
-                    Image(systemName: "photo")
-                        .foregroundStyle(.secondary)
-                )
-            VStack(alignment: .leading, spacing: 4) {
-                Text(scene.name.isEmpty ? "未命名场景" : scene.name)
-                    .font(.subheadline.weight(.semibold))
-                Text(scene.description.isEmpty ? "暂无描述" : scene.description)
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-                    .lineLimit(2)
+        ZStack(alignment: .bottomLeading) {
+            if let image = coverImage {
+                Image(nsImage: image)
+                    .resizable()
+                    .scaledToFill()
+                    .frame(width: 220, height: 280)
+                    .clipped()
+            } else {
+                ZStack {
+                    Rectangle()
+                        .fill(Color.blue.opacity(0.12))
+                    VStack(spacing: 6) {
+                        Image(systemName: "photo.on.rectangle")
+                            .font(.title)
+                        Text("未上传封面")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
+                }
+                .frame(width: 220, height: 280)
             }
-            Spacer()
+
+            LinearGradient(
+                colors: [Color.black.opacity(0.5), Color.black.opacity(0.1)],
+                startPoint: .bottom,
+                endPoint: .top
+            )
+            .frame(height: 110)
+            .frame(maxWidth: .infinity, alignment: .bottom)
+            .allowsHitTesting(false)
+
+            VStack(alignment: .leading, spacing: 6) {
+                Text(scene.name.isEmpty ? "未命名场景" : scene.name)
+                    .font(.headline)
+                    .foregroundStyle(.white)
+                Text(variantBadge)
+                    .font(.caption2)
+                    .foregroundStyle(.white.opacity(0.9))
+                if isExpanded {
+                    Text(scene.description.isEmpty ? "暂无描述" : scene.description)
+                        .font(.caption)
+                        .foregroundStyle(.white.opacity(0.9))
+                        .lineLimit(3)
+                }
+            }
+            .padding(14)
         }
-        .padding(12)
-        .background(
-            RoundedRectangle(cornerRadius: 14)
-                .fill(Color(nsColor: .windowBackgroundColor))
-        )
+        .frame(width: 220, height: 280)
+        .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
+        .shadow(color: .black.opacity(0.12), radius: 12, y: 8)
+        .contentShape(Rectangle())
+        .onTapGesture {
+            if let onTap {
+                onTap()
+            } else {
+                withAnimation(.easeInOut(duration: 0.2)) {
+                    isExpanded.toggle()
+                }
+            }
+        }
     }
 }
 
 struct EditablePersonaRow: View {
     @Binding var character: ProjectCharacterProfile
     let onDelete: () -> Void
+    @State private var pickerIsRunning = false
 
     var body: some View {
         HStack(alignment: .top, spacing: 12) {
-            Circle()
-                .fill(Color.accentColor.opacity(0.2))
-                .frame(width: 44, height: 44)
-                .overlay(
-                    Text(String(character.name.prefix(1)).uppercased())
-                )
+            ZStack {
+                RoundedRectangle(cornerRadius: 10)
+                    .fill(Color.accentColor.opacity(0.12))
+                    .frame(width: 64, height: 64)
+                if let data = character.imageData, let image = NSImage(data: data) {
+                    Image(nsImage: image)
+                        .resizable()
+                        .scaledToFill()
+                        .frame(width: 64, height: 64)
+                        .clipped()
+                        .clipShape(RoundedRectangle(cornerRadius: 10))
+                } else {
+                    Image(systemName: "person.crop.square")
+                        .foregroundStyle(.secondary)
+                }
+            }
             VStack(alignment: .leading, spacing: 6) {
                 TextField("角色名称", text: $character.name)
                     .textFieldStyle(.roundedBorder)
                 TextField("角色简介", text: $character.description, axis: .vertical)
                     .textFieldStyle(.roundedBorder)
+                TextField("生成提示词", text: $character.prompt, axis: .vertical)
+                    .textFieldStyle(.roundedBorder)
+                HStack(spacing: 8) {
+                    Button("上传封面") {
+                        pickImage { data in
+                            character.imageData = data
+                            if character.variants.isEmpty {
+                                character.variants = [
+                                    CharacterVariant(
+                                        images: [CharacterImage(data: data, isCover: true)]
+                                    )
+                                ]
+                            } else {
+                                character.variants[0].images.insert(CharacterImage(data: data, isCover: true), at: 0)
+                                character.variants[0].images = updateCoverState(character.variants[0].images)
+                            }
+                        }
+                    }
+                    Button("清除封面") {
+                        character.imageData = nil
+                        if character.variants.isEmpty == false {
+                            character.variants[0].images = []
+                        }
+                    }
+                    .disabled(character.imageData == nil)
+                }
+                if character.variants.isEmpty {
+                    Button("添加形态") {
+                        character.variants.append(CharacterVariant())
+                    }
+                }
+                if character.variants.isEmpty == false {
+                    VariantEditor(
+                        variants: $character.variants,
+                        isCharacter: true
+                    )
+                }
             }
             Spacer()
             Button(role: .destructive, action: onDelete) {
@@ -657,23 +835,95 @@ struct EditablePersonaRow: View {
             .buttonStyle(.plain)
         }
     }
+
+    private func pickImage(_ handler: @escaping (Data?) -> Void) {
+        guard pickerIsRunning == false else { return }
+        pickerIsRunning = true
+        let panel = NSOpenPanel()
+        panel.canChooseDirectories = false
+        panel.allowsMultipleSelection = false
+        panel.allowedContentTypes = [.jpeg, .png, .tiff, .heic]
+        if panel.runModal() == .OK, let url = panel.url, let data = try? Data(contentsOf: url) {
+            handler(data)
+        }
+        pickerIsRunning = false
+    }
+
+    private func updateCoverState(_ images: [CharacterImage]) -> [CharacterImage] {
+        guard images.isEmpty == false else { return images }
+        var updated = images
+        for idx in updated.indices {
+            updated[idx].isCover = idx == 0
+        }
+        return updated
+    }
 }
 
 struct EditableSceneRow: View {
     @Binding var scene: ProjectSceneProfile
     let onDelete: () -> Void
+    @State private var pickerIsRunning = false
 
     var body: some View {
         HStack(alignment: .top, spacing: 12) {
-            RoundedRectangle(cornerRadius: 12)
-                .strokeBorder(Color.secondary.opacity(0.3), lineWidth: 1)
-                .frame(width: 60, height: 44)
-                .overlay(Image(systemName: "photo"))
+            ZStack {
+                RoundedRectangle(cornerRadius: 10)
+                    .fill(Color.blue.opacity(0.12))
+                    .frame(width: 64, height: 64)
+                if let data = scene.imageData, let image = NSImage(data: data) {
+                    Image(nsImage: image)
+                        .resizable()
+                        .scaledToFill()
+                        .frame(width: 64, height: 64)
+                        .clipped()
+                        .clipShape(RoundedRectangle(cornerRadius: 10))
+                } else {
+                    Image(systemName: "photo.on.rectangle")
+                        .foregroundStyle(.secondary)
+                }
+            }
             VStack(alignment: .leading, spacing: 6) {
                 TextField("场景名称", text: $scene.name)
                     .textFieldStyle(.roundedBorder)
                 TextField("场景简介", text: $scene.description, axis: .vertical)
                     .textFieldStyle(.roundedBorder)
+                HStack(spacing: 8) {
+                    Button("上传封面") {
+                        pickImage { data in
+                            scene.imageData = data
+                            if scene.variants.isEmpty {
+                                scene.variants = [
+                                    SceneVariant(
+                                        images: [SceneImage(data: data, isCover: true)]
+                                    )
+                                ]
+                            } else {
+                                scene.variants[0].images.insert(SceneImage(data: data, isCover: true), at: 0)
+                                scene.variants[0].images = updateCoverState(scene.variants[0].images)
+                            }
+                        }
+                    }
+                    Button("清除封面") {
+                        scene.imageData = nil
+                        if scene.variants.isEmpty == false {
+                            scene.variants[0].images = []
+                        }
+                    }
+                    .disabled(scene.imageData == nil)
+                }
+                TextField("生成提示词", text: $scene.prompt, axis: .vertical)
+                    .textFieldStyle(.roundedBorder)
+                if scene.variants.isEmpty {
+                    Button("添加视角/子版本") {
+                        scene.variants.append(SceneVariant())
+                    }
+                }
+                if scene.variants.isEmpty == false {
+                    VariantEditor(
+                        variants: $scene.variants,
+                        isCharacter: false
+                    )
+                }
             }
             Spacer()
             Button(role: .destructive, action: onDelete) {
@@ -681,6 +931,28 @@ struct EditableSceneRow: View {
             }
             .buttonStyle(.plain)
         }
+    }
+
+    private func pickImage(_ handler: @escaping (Data?) -> Void) {
+        guard pickerIsRunning == false else { return }
+        pickerIsRunning = true
+        let panel = NSOpenPanel()
+        panel.canChooseDirectories = false
+        panel.allowsMultipleSelection = false
+        panel.allowedContentTypes = [.jpeg, .png, .tiff, .heic]
+        if panel.runModal() == .OK, let url = panel.url, let data = try? Data(contentsOf: url) {
+            handler(data)
+        }
+        pickerIsRunning = false
+    }
+
+    private func updateCoverState(_ images: [SceneImage]) -> [SceneImage] {
+        guard images.isEmpty == false else { return images }
+        var updated = images
+        for idx in updated.indices {
+            updated[idx].isCover = idx == 0
+        }
+        return updated
     }
 }
 
