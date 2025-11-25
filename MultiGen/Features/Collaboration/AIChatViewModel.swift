@@ -145,7 +145,7 @@ final class AIChatViewModel: ObservableObject {
         isSending = true
 
         Task { [weak self] in
-            await self?.performStream(request: request, context: context)
+            await self?.performOnce(request: request, context: context)
         }
     }
 
@@ -568,6 +568,25 @@ final class AIChatViewModel: ObservableObject {
         isSending = false
     }
 
+    private func performOnce(request: AIActionRequest, context: ChatContext) async {
+        guard let actionCenter else { return }
+        messages.append(AIChatMessage(role: .assistant, text: "（正在生成...）", detail: nil))
+        let placeholderID = messages.last!.id
+
+        do {
+            let result = try await actionCenter.perform(request)
+            handleAIResponse(result: result, context: context, targetMessageID: placeholderID)
+            applyStoryboardAutomationIfNeeded(result: result, context: context)
+        } catch {
+            errorMessage = "请求失败：\(error.localizedDescription)"
+            if let index = messages.firstIndex(where: { $0.id == placeholderID }) {
+                messages.remove(at: index)
+            }
+        }
+        attachmentController.reset()
+        isSending = false
+    }
+
     private var currentThreadIdentifier: ChatThreadKey {
         guard let coordinator = contextCoordinator else { return .general }
         return coordinator.threadIdentifier(for: currentContext)
@@ -612,14 +631,28 @@ final class AIChatViewModel: ObservableObject {
         if let image = result.image {
             images.append(image)
         } else if let base64 = result.imageBase64,
-                  let data = Data(base64Encoded: base64),
+                  let data = Data(base64Encoded: cleanBase64(base64), options: .ignoreUnknownCharacters),
                   let img = NSImage(data: data) {
             images.append(img)
+        } else if let url = result.imageURL {
+            if let data = try? Data(contentsOf: url),
+               let img = NSImage(data: data) {
+                images.append(img)
+            } else if url.absoluteString.hasPrefix("data:image"),
+                      let base64 = url.absoluteString.split(separator: ",").dropFirst().first,
+                      let data = Data(base64Encoded: cleanBase64(String(base64)), options: .ignoreUnknownCharacters),
+                      let img = NSImage(data: data) {
+                images.append(img)
+            }
         }
 
         var cleanedText = result.text ?? "(无文本输出)"
+        // 移除内联 data:image 文本，防止长串 base64 污染显示
+        if let range = cleanedText.range(of: "data:image") {
+            cleanedText = String(cleanedText[..<range.lowerBound]).trimmingCharacters(in: .whitespacesAndNewlines)
+        }
         if images.isEmpty {
-            if let inline = extractInlineImage(from: cleanedText) {
+            if let inline = extractInlineImage(from: result.text ?? "") {
                 images.append(inline.image)
                 cleanedText = inline.cleanedText
             }
@@ -654,10 +687,14 @@ final class AIChatViewModel: ObservableObject {
         let substring = String(text[range.lowerBound...])
         guard let comma = substring.firstIndex(of: ",") else { return nil }
         let base64Part = String(substring[substring.index(after: comma)...])
-        guard let data = Data(base64Encoded: base64Part),
+        guard let data = Data(base64Encoded: cleanBase64(base64Part), options: .ignoreUnknownCharacters),
               let img = NSImage(data: data) else { return nil }
         let cleaned = text.replacingOccurrences(of: substring, with: "").trimmingCharacters(in: .whitespacesAndNewlines)
         return (img, cleaned.isEmpty ? "(见图片)" : cleaned)
+    }
+
+    private func cleanBase64(_ text: String) -> String {
+        text.components(separatedBy: .whitespacesAndNewlines).joined()
     }
 
     private func persistProjectSummary(_ summary: String, project: ScriptProject) async {
@@ -869,48 +906,22 @@ final class AIChatViewModel: ObservableObject {
             module: module,
             systemPrompt: systemPrompt.isEmpty ? nil : systemPrompt
         )
-        if attachments.isEmpty == false {
-            fields["imageAttachmentCount"] = "\(attachments.count)"
-            for (index, attachment) in attachments.enumerated() {
-                let key = "imageAttachment\(index + 1)"
-                let plain = attachment.base64String
-                let uri = dataURI(for: attachment)
-                fields["\(key)FileName"] = attachment.fileName
-                fields["\(key)Base64"] = plain
-                fields["\(key)DataURI"] = uri
-            }
-            // 为兼容多模态模型，附加首图的通用字段
-            if let first = attachments.first {
-                let plain = first.base64String
-                let uri = dataURI(for: first)
-                fields["imageBase64"] = plain
-                fields["image_base64"] = plain
-                fields["image_url"] = uri
-                fields["image_mime"] = mimeType(for: first.fileName)
-            }
-            // 通用 JSON 载荷，兼容常见多模态接口（OpenAI/Google/Baidu 等）
-            let attachmentPayload = attachments.map { attachment in
-                [
-                    "fileName": attachment.fileName,
-                    "mime": mimeType(for: attachment.fileName),
-                    "base64": attachment.base64String,
-                    "dataURI": dataURI(for: attachment)
-                ]
-            }
-            if let json = try? JSONSerialization.data(withJSONObject: attachmentPayload, options: []),
-               let jsonString = String(data: json, encoding: .utf8) {
-                fields["images_json"] = jsonString
-            }
-            // OpenAI 样式 content 字段（messages[0]）
-            if let first = attachments.first {
-                let openAIContent: [[String: Any]] = [
-                    ["type": "text", "text": prompt],
-                    ["type": "image_url", "image_url": ["url": dataURI(for: first)]]
-                ]
-                if let data = try? JSONSerialization.data(withJSONObject: openAIContent, options: []),
-                   let text = String(data: data, encoding: .utf8) {
-                    fields["openai_content"] = text
-                }
+        if let first = attachments.first {
+            // 业界通用精简字段：仅传一张图，避免重复字段膨胀上下文
+            let plain = first.base64String
+            let uri = dataURI(for: first)
+            fields["image_base64"] = plain        // OpenAI / 部分多模态兼容
+            fields["imageBase64"] = plain         // 兼容旧键
+            fields["image_url"] = uri             // data URI 形式
+            fields["image_mime"] = mimeType(for: first.fileName)
+            // OpenAI-style content JSON（单条 message，便于后端直接透传）
+            let openAIContent: [[String: Any]] = [
+                ["type": "text", "text": prompt],
+                ["type": "image_url", "image_url": ["url": uri]]
+            ]
+            if let data = try? JSONSerialization.data(withJSONObject: openAIContent, options: []),
+               let text = String(data: data, encoding: .utf8) {
+                fields["openai_content"] = text
             }
         }
         return fields

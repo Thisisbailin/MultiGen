@@ -1,9 +1,11 @@
 import SwiftUI
+import Foundation
 
 struct ChatBubble: View {
     let message: AIChatMessage
     var isExpanded: Bool = false
     var onToggleDetail: () -> Void = {}
+    var onImageTap: (NSImage) -> Void = { _ in }
 
     var body: some View {
         HStack {
@@ -16,6 +18,33 @@ struct ChatBubble: View {
                     Text(message.text)
                         .font(.body)
                         .foregroundStyle(foregroundColor)
+                    if message.images.isEmpty,
+                       let remoteURL = extractImageURL(from: message.text) {
+                        AsyncImage(url: remoteURL) { phase in
+                            switch phase {
+                            case .empty:
+                                HStack {
+                                    ProgressView()
+                                    Text("正在加载图片…")
+                                }
+                                .padding(8)
+                                .background(Color.black.opacity(0.05))
+                                .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
+                            case .success(let image):
+                                image
+                                    .resizable()
+                                    .scaledToFit()
+                                    .frame(maxWidth: 260)
+                                    .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+                            case .failure:
+                                Text("图片加载失败")
+                                    .font(.caption)
+                                    .foregroundStyle(.secondary)
+                            @unknown default:
+                                EmptyView()
+                            }
+                        }
+                    }
                     if message.images.isEmpty == false {
                         ScrollView(.horizontal, showsIndicators: false) {
                             HStack(spacing: 10) {
@@ -29,6 +58,7 @@ struct ChatBubble: View {
                                             RoundedRectangle(cornerRadius: 12, style: .continuous)
                                                 .stroke(Color.secondary.opacity(0.2))
                                         )
+                                        .onTapGesture { onImageTap(image) }
                                 }
                             }
                         }
@@ -87,11 +117,34 @@ struct ChatBubble: View {
             return .primary
         }
     }
+
+    private func extractImageURL(from text: String) -> URL? {
+        if let markdownURL = extractMarkdownImageURL(from: text) {
+            return markdownURL
+        }
+        let pattern = #"https?://\S+"#
+        if let range = text.range(of: pattern, options: .regularExpression) {
+            let candidate = String(text[range]).trimmingCharacters(in: .punctuationCharacters)
+            return URL(string: candidate)
+        }
+        return nil
+    }
+
+    private func extractMarkdownImageURL(from text: String) -> URL? {
+        let pattern = #"!\[.*?\]\((https?://.*?)\)"#
+        guard let regex = try? NSRegularExpression(pattern: pattern) else { return nil }
+        let nsText = text as NSString
+        let results = regex.matches(in: text, range: NSRange(location: 0, length: nsText.length))
+        guard let match = results.first, match.numberOfRanges >= 2 else { return nil }
+        let urlString = nsText.substring(with: match.range(at: 1)).replacingOccurrences(of: "\\", with: "")
+        return URL(string: urlString)
+    }
 }
 
 struct ChatMessageList: View {
     let messages: [AIChatMessage]
     @Binding var expandedIDs: Set<UUID>
+    var onImageTap: (NSImage) -> Void = { _ in }
 
     var body: some View {
         ScrollViewReader { proxy in
@@ -101,7 +154,8 @@ struct ChatMessageList: View {
                         ChatBubble(
                             message: message,
                             isExpanded: expandedIDs.contains(message.id),
-                            onToggleDetail: { toggleExpand(message) }
+                            onToggleDetail: { toggleExpand(message) },
+                            onImageTap: onImageTap
                         )
                         .id(message.id)
                     }
@@ -150,6 +204,8 @@ struct ChatInputBar: View {
                     RoundedRectangle(cornerRadius: 12, style: .continuous)
                         .fill(Color(nsColor: .windowBackgroundColor))
                 )
+                .onSubmit(onSend)
+                .submitLabel(.send)
                 .focused($isTextFocused)
                 .disabled(isSending)
 

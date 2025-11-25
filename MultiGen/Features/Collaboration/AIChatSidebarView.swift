@@ -11,6 +11,7 @@ struct AIChatSidebarView: View {
 
     @StateObject private var viewModel: AIChatViewModel
     @State private var expandedMessageIDs: Set<UUID> = []
+    @State private var previewImage: NSImage?
 
     init(moduleOverride: AIChatModule? = nil) {
         _viewModel = StateObject(wrappedValue: AIChatViewModel(moduleOverride: moduleOverride))
@@ -34,7 +35,8 @@ struct AIChatSidebarView: View {
 
             ChatMessageList(
                 messages: viewModel.messages,
-                expandedIDs: $expandedMessageIDs
+                expandedIDs: $expandedMessageIDs,
+                onImageTap: { img in previewImage = img }
             )
 
             VStack(alignment: .leading, spacing: 6) {
@@ -77,6 +79,19 @@ struct AIChatSidebarView: View {
                 }
             )
             .onAppear { viewModel.presentHistory() }
+        }
+        .sheet(isPresented: Binding(get: { previewImage != nil }, set: { if $0 == false { previewImage = nil } })) {
+            if let image = previewImage {
+                VStack {
+                    ScrollView([.vertical, .horizontal]) {
+                        Image(nsImage: image)
+                            .resizable()
+                            .scaledToFit()
+                            .padding()
+                    }
+                }
+                .frame(minWidth: 500, minHeight: 400)
+            }
         }
     }
 

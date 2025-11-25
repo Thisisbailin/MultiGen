@@ -11,6 +11,10 @@ final class RelayTextService: AITextServiceProtocol {
     private let configuration: AppConfiguration
     private let session: URLSession
     private let modelOverrideField = "__modelOverride"
+    private let imageURLField = "image_url"
+    private let imageBase64Field = "image_base64"
+    private let imageMimeField = "image_mime"
+    private let openAIContentField = "openai_content"
 
     init(configuration: AppConfiguration, session: URLSession = .shared) {
         self.configuration = configuration
@@ -33,11 +37,9 @@ final class RelayTextService: AITextServiceProtocol {
         urlRequest.setValue("application/json", forHTTPHeaderField: "Content-Type")
         urlRequest.setValue("Bearer \(snapshot.apiKey)", forHTTPHeaderField: "Authorization")
 
-        let combinedPrompt = makeCombinedPrompt(for: request, model: snapshot.model)
-
         let body = RelayChatRequest(
             model: snapshot.model,
-            messages: [.init(role: "user", content: combinedPrompt)],
+            messages: makeMessages(for: request, model: snapshot.model),
             temperature: 0.85,
             stream: nil
         )
@@ -77,8 +79,20 @@ final class RelayTextService: AITextServiceProtocol {
             print("[RelayTextService] Usage -> prompt: \(usage.promptTokens ?? 0), completion: \(usage.completionTokens ?? 0), total: \(usage.totalTokens ?? 0)")
         }
 
-        let imageURLString = message.firstImageURL
-        let parsedImage = Self.parseImageURL(imageURLString)
+        let primaryURL = message.firstImageURL
+        var parsedImage = Self.parseImageURL(primaryURL)
+        // Fallback: 直接解析原始 JSON 中的 images 数组（与 GenMe 相同逻辑）
+        if parsedImage.url == nil && parsedImage.base64 == nil,
+           let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+           let choices = json["choices"] as? [[String: Any]],
+           let first = choices.first,
+           let msg = first["message"] as? [String: Any],
+           let images = msg["images"] as? [[String: Any]],
+           let imgObj = images.first,
+           let imgURLObj = imgObj["image_url"] as? [String: Any],
+           let urlString = imgURLObj["url"] as? String {
+            parsedImage = Self.parseImageURL(urlString)
+        }
 
         let metadata = SceneJobResult.Metadata(
             prompt: text,
@@ -114,7 +128,7 @@ final class RelayTextService: AITextServiceProtocol {
 
                     let body = RelayChatRequest(
                         model: snapshot.model,
-                        messages: [.init(role: "user", content: makeCombinedPrompt(for: request, model: snapshot.model))],
+                        messages: makeMessages(for: request, model: snapshot.model),
                         temperature: 0.85,
                         stream: true
                     )
@@ -181,16 +195,71 @@ final class RelayTextService: AITextServiceProtocol {
         }
     }
 
+    private func makeMessages(for request: SceneJobRequest, model: String) -> [RelayChatRequest.Message] {
+        var messages: [RelayChatRequest.Message] = []
+        if let systemPrompt = request.fields["systemPrompt"]?.trimmingCharacters(in: .whitespacesAndNewlines),
+           systemPrompt.isEmpty == false {
+            messages.append(.system(systemPrompt))
+        }
+        let contentParts = makeContentParts(for: request, model: model)
+        messages.append(.user(contentParts))
+        return messages
+    }
+
+    private func makeContentParts(for request: SceneJobRequest, model: String) -> [RelayChatRequest.Message.Content] {
+        var parts: [RelayChatRequest.Message.Content] = [
+            .text(makeCombinedPrompt(for: request, model: model))
+        ]
+        if let openAIContent = request.fields[openAIContentField],
+           let parsed = parseOpenAIContent(openAIContent) {
+            parts.append(contentsOf: parsed)
+            return parts
+        }
+        if let imageURL = preferredImageURL(from: request.fields) {
+            parts.append(.imageURL(imageURL))
+        }
+        return parts
+    }
+
+    private func parseOpenAIContent(_ jsonText: String) -> [RelayChatRequest.Message.Content]? {
+        guard let data = jsonText.data(using: .utf8),
+              let array = try? JSONSerialization.jsonObject(with: data) as? [[String: Any]] else {
+            return nil
+        }
+        var parts: [RelayChatRequest.Message.Content] = []
+        for item in array {
+            guard let type = item["type"] as? String else { continue }
+            if type == "text", let text = item["text"] as? String {
+                parts.append(.text(text))
+            } else if type == "image_url",
+                      let imageURL = (item["image_url"] as? [String: Any])?["url"] as? String {
+                parts.append(.imageURL(imageURL))
+            }
+        }
+        return parts.isEmpty ? nil : parts
+    }
+
+    private func preferredImageURL(from fields: [String: String]) -> String? {
+        if let inline = fields[imageURLField], inline.isEmpty == false {
+            return inline
+        }
+        if let base64 = fields[imageBase64Field], base64.isEmpty == false {
+            let mime = fields[imageMimeField] ?? "image/jpeg"
+            return "data:\(mime);base64,\(base64)"
+        }
+        return nil
+    }
+
     private func makeCombinedPrompt(for request: SceneJobRequest, model: String) -> String {
-        let systemPrompt = request.fields["systemPrompt"]?.trimmingCharacters(in: .whitespacesAndNewlines)
         let filteredFields = request.fields.filter { key, _ in
-            key != "systemPrompt" && key != modelOverrideField
+            key != "systemPrompt"
+            && key != modelOverrideField
+            && key != imageURLField
+            && key != imageBase64Field
+            && key != imageMimeField
+            && key != openAIContentField
         }
-        let body = promptBody(action: request.action, fields: filteredFields, assetRefs: request.assetReferences)
-        if let systemPrompt, systemPrompt.isEmpty == false {
-            return "\(systemPrompt)\n\(body)"
-        }
-        return body
+        return promptBody(action: request.action, fields: filteredFields, assetRefs: request.assetReferences)
     }
 
     private func promptBody(action: SceneAction, fields: [String: String], assetRefs: [String]) -> String {
@@ -239,7 +308,47 @@ final class RelayTextService: AITextServiceProtocol {
 private struct RelayChatRequest: Encodable {
     struct Message: Encodable {
         let role: String
-        let content: String
+        let content: [Content]
+
+        init(role: String, content: [Content]) {
+            self.role = role
+            self.content = content
+        }
+
+        static func system(_ text: String) -> Message {
+            Message(role: "system", content: [.text(text)])
+        }
+
+        static func user(_ content: [Content]) -> Message {
+            Message(role: "user", content: content)
+        }
+
+        enum Content: Encodable {
+            case text(String)
+            case imageURL(String)
+
+            enum CodingKeys: String, CodingKey {
+                case type
+                case text
+                case imageURL = "image_url"
+            }
+
+            func encode(to encoder: Encoder) throws {
+                var container = encoder.container(keyedBy: CodingKeys.self)
+                switch self {
+                case .text(let text):
+                    try container.encode("text", forKey: .type)
+                    try container.encode(text, forKey: .text)
+                case .imageURL(let url):
+                    try container.encode("image_url", forKey: .type)
+                    try container.encode(ImageURL(url: url), forKey: .imageURL)
+                }
+            }
+        }
+
+        struct ImageURL: Encodable {
+            let url: String
+        }
     }
 
     let model: String

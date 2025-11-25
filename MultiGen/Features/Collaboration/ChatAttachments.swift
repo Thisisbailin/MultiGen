@@ -31,11 +31,12 @@ final class ChatAttachmentController: ObservableObject {
             let urls = Array(panel.urls.prefix(remainingCapacity))
             for url in urls {
                 do {
-                    let data = try Data(contentsOf: url)
-                    guard let image = NSImage(data: data) else {
+                    let rawData = try Data(contentsOf: url)
+                    guard let image = NSImage(data: rawData) else {
                         onError("无法读取图片：\(url.lastPathComponent)")
                         continue
                     }
+                    let data = compress(image: image, fallback: rawData)
                     let attachment = ImageAttachment(
                         data: data,
                         preview: image,
@@ -66,6 +67,27 @@ final class ChatAttachmentController: ObservableObject {
             .gif,
             .heic
         ].compactMap { $0 }
+    }
+
+    private func compress(image: NSImage, fallback: Data, maxDimension: CGFloat = 512, quality: CGFloat = 0.7) -> Data {
+        let targetSize: NSSize
+        if image.size.width > image.size.height {
+            let ratio = maxDimension / max(image.size.width, 1)
+            targetSize = NSSize(width: maxDimension, height: max(1, image.size.height * ratio))
+        } else {
+            let ratio = maxDimension / max(image.size.height, 1)
+            targetSize = NSSize(width: max(1, image.size.width * ratio), height: maxDimension)
+        }
+        let newImage = NSImage(size: targetSize)
+        newImage.lockFocus()
+        image.draw(in: NSRect(origin: .zero, size: targetSize), from: .zero, operation: .copy, fraction: 1.0)
+        newImage.unlockFocus()
+        guard let tiff = newImage.tiffRepresentation,
+              let rep = NSBitmapImageRep(data: tiff),
+              let data = rep.representation(using: .jpeg, properties: [.compressionFactor: quality]) else {
+            return fallback
+        }
+        return data.count < fallback.count ? data : fallback
     }
 }
 
