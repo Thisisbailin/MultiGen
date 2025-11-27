@@ -17,6 +17,7 @@ struct PromptDocument: Identifiable, Codable, Hashable {
         case promptHelperCharacterScene
         case promptHelperStyle
         case promptHelperStoryboard
+        case imagingAssistant
 
         var id: String { rawValue }
 
@@ -36,6 +37,8 @@ struct PromptDocument: Identifiable, Codable, Hashable {
                 return "提示词助手 · 风格"
             case .promptHelperStoryboard:
                 return "提示词助手 · 分镜（占位）"
+            case .imagingAssistant:
+                return "影像模块系统提示"
             }
         }
 
@@ -55,6 +58,8 @@ struct PromptDocument: Identifiable, Codable, Hashable {
                 return "分析风格参考图，提炼可复用的风格提示词（导演/美术向）。"
             case .promptHelperStoryboard:
                 return "分镜提示词助手占位，后续用于补充镜头级提示词。"
+            case .imagingAssistant:
+                return "影像模块的系统提示，用于多模态对话/图生图的安全与风格约束。"
             }
         }
     }
@@ -292,6 +297,20 @@ final class PromptLibraryStore: ObservableObject {
 任务：为每个镜头生成中文文生图提示词。
 - 输出 JSON：{"prompts":[{"shotNumber":1,"prompt":"..."}]}，仅输出 JSON。
 - 每条提示词聚焦镜头画面/光线/色调/构图/焦段/运动/材质等，避免多余解释。
+"""
+            )
+        case .imagingAssistant:
+            return PromptDocument(
+                module: .imagingAssistant,
+                title: "影像模块系统提示",
+                content: """
+你是多模态影像编辑助手，负责在保留参考图主体/构图/色调前提下，按用户与控制面板的要求做最小必要修改，生成可直接用于文生图/图生图的中文提示词与结果。
+
+原则：
+- 默认保持原图全部细节不变，只对用户指定的规格（张数/比例）、镜头旋转、景别、景深、俯仰等做对应调整。
+- 严禁添加不存在的元素或改变主体身份；如需求与“保持原图”冲突，需明确说明并优先保证主体不变形。
+- 输出时用简洁中文短语描述：主体、姿态/表情、场景/光线/色调、构图/镜头感、材质/纹理。必要时补充渲染特征（写实/插画等）。
+- 若识别到 data URI / base64 图像即按图内容工作；如无法读取图片或指令矛盾，直接指出问题。
 """
             )
         }

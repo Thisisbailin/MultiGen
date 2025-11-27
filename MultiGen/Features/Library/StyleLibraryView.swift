@@ -8,6 +8,7 @@ struct StyleLibraryView: View {
     @EnvironmentObject private var promptLibraryStore: PromptLibraryStore
     @State private var isProcessing = false
     @State private var statusMessage: String?
+    @State private var previewImage: NSImage?
 
     private var styles: [StyleReference] {
         store.styles
@@ -25,7 +26,8 @@ struct StyleLibraryView: View {
                             StyleCard(
                                 style: style,
                                 onAnalyze: { analyze(style) },
-                                onDelete: { store.removeStyle(id: style.id) }
+                                onDelete: { store.removeStyle(id: style.id) },
+                                onImageTap: { image in previewImage = image }
                             )
                         }
                     }
@@ -39,6 +41,17 @@ struct StyleLibraryView: View {
             }
         }
         .padding(16)
+        .sheet(isPresented: Binding(get: { previewImage != nil }, set: { if $0 == false { previewImage = nil } })) {
+            if let image = previewImage {
+                ScrollView([.vertical, .horizontal]) {
+                    Image(nsImage: image)
+                        .resizable()
+                        .scaledToFit()
+                        .padding()
+                }
+                .frame(minWidth: 480, minHeight: 360)
+            }
+        }
     }
 
     private var header: some View {
@@ -78,20 +91,37 @@ struct StyleLibraryView: View {
         }
         isProcessing = true
         statusMessage = "AI 正在分析风格…"
-        let base64 = ensureCompressedData(data: data, maxBytes: 1_200_000).base64EncodedString()
+        let compressed = ensureCompressedData(data: data, maxBytes: 1_200_000)
+        let base64 = compressed.base64EncodedString()
+        let mime = "image/jpeg"
+        let dataURI = "data:\(mime);base64,\(base64)"
         let systemPrompt = promptLibraryStore.document(for: .promptHelperStyle).content.trimmingCharacters(in: .whitespacesAndNewlines)
         let prompt = """
-请根据参考图直接详细描绘画面本身，输出 300-500 字中文提示词，用逗号或顿号串联短语，覆盖主体/场景、外观细节、光线方向与质感、色调对比、材质纹理、构图/景别/镜头感、时代/流派/风格暗示。如无人物请说明“无人物”。只输出正文，不要解释或代码块。
+你是一名专业生图提示词工程师。请精准反推“如何写提示词才能一比一还原生成这张图”。要求：
+- 输出 200-500 字中文，直接给出可粘贴使用的生图提示词正文，勿加序号/解释/前缀/代码块。
+- 覆盖：主体与场景（身份/姿态/表情/动作/视角）、服饰与配件、材质与纹理、光线方向与强度、色调与对比、构图与景别、镜头感（焦段/景深/虚化）、背景与环境细节、风格/流派/时代暗示、画质/渲染特征（如写实/插画/3D等）。
+- 如果无人物，请明确描述主体与环境细节。
 """
         let fields: [String: String] = {
             var f: [String: String] = [
                 "prompt": prompt,
-                // 同时提供兼容字段，避免模型忽略图片
+                // 通用兼容字段，避免模型忽略图片
+                "image_base64": base64,
                 "imageBase64": base64,
+                "image_url": dataURI,
+                "image_mime": mime,
                 "imageAttachmentCount": "1",
                 "imageAttachment1FileName": "style-reference.jpg",
                 "imageAttachment1Base64": base64
             ]
+            let contentPayload: [[String: Any]] = [
+                ["type": "text", "text": prompt],
+                ["type": "image_url", "image_url": ["url": dataURI]]
+            ]
+            if let data = try? JSONSerialization.data(withJSONObject: contentPayload),
+               let text = String(data: data, encoding: .utf8) {
+                f["openai_content"] = text
+            }
             if systemPrompt.isEmpty == false {
                 f["systemPrompt"] = systemPrompt
             }
@@ -173,50 +203,56 @@ private struct StyleCard: View {
     let style: StyleReference
     let onAnalyze: () -> Void
     let onDelete: () -> Void
+    let onImageTap: (NSImage) -> Void
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 10) {
+        HStack(alignment: .top, spacing: 14) {
             if let data = style.imageData, let image = NSImage(data: data) {
                 Image(nsImage: image)
                     .resizable()
                     .scaledToFit()
-                    .frame(maxWidth: .infinity)
+                    .frame(width: 240, height: 240)
                     .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
+                    .onTapGesture { onImageTap(image) }
             } else {
                 RoundedRectangle(cornerRadius: 14, style: .continuous)
                     .fill(Color.secondary.opacity(0.12))
-                    .frame(height: 240)
+                    .frame(width: 240, height: 240)
                     .overlay(Image(systemName: "photo").font(.largeTitle))
             }
-            Text(style.title)
-                .font(.headline)
-            if style.prompt.isEmpty == false {
-                ScrollView {
-                    Text(style.prompt)
+
+            VStack(alignment: .leading, spacing: 8) {
+                Text(style.title)
+                    .font(.headline)
+                if style.prompt.isEmpty == false {
+                    ScrollView {
+                        Text(style.prompt)
+                            .font(.callout)
+                            .foregroundStyle(.secondary)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                            .multilineTextAlignment(.leading)
+                    }
+                    .frame(minHeight: 160, maxHeight: 260)
+                } else {
+                    Text("尚未分析风格")
                         .font(.callout)
                         .foregroundStyle(.secondary)
-                        .frame(maxWidth: .infinity, alignment: .leading)
                 }
-                .frame(minHeight: 140, maxHeight: 260)
-            } else {
-                Text("尚未分析风格")
-                    .font(.callout)
-                    .foregroundStyle(.secondary)
-            }
-            HStack {
-                Button {
-                    onAnalyze()
-                } label: {
-                    Label("分析风格", systemImage: "sparkles")
+                HStack {
+                    Button {
+                        onAnalyze()
+                    } label: {
+                        Label("分析风格", systemImage: "sparkles")
+                    }
+                    .buttonStyle(.bordered)
+                    Spacer()
+                    Button(role: .destructive) {
+                        onDelete()
+                    } label: {
+                        Image(systemName: "trash")
+                    }
+                    .buttonStyle(.plain)
                 }
-                .buttonStyle(.bordered)
-                Spacer()
-                Button(role: .destructive) {
-                    onDelete()
-                } label: {
-                    Image(systemName: "trash")
-                }
-                .buttonStyle(.plain)
             }
         }
         .padding(12)

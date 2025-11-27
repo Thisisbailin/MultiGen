@@ -207,14 +207,13 @@ final class RelayTextService: AITextServiceProtocol {
     }
 
     private func makeContentParts(for request: SceneJobRequest, model: String) -> [RelayChatRequest.Message.Content] {
+        if let openAIContent = request.fields[openAIContentField],
+           let parsed = parseOpenAIContent(openAIContent) {
+            return parsed
+        }
         var parts: [RelayChatRequest.Message.Content] = [
             .text(makeCombinedPrompt(for: request, model: model))
         ]
-        if let openAIContent = request.fields[openAIContentField],
-           let parsed = parseOpenAIContent(openAIContent) {
-            parts.append(contentsOf: parsed)
-            return parts
-        }
         if let imageURL = preferredImageURL(from: request.fields) {
             parts.append(.imageURL(imageURL))
         }

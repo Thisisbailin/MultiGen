@@ -64,7 +64,7 @@ final class StoryboardGenerationCoordinator {
         )
         let systemPrompt = promptLibraryStore.document(for: .storyboard).content
 
-        var fields = StoryboardPromptBuilder(
+        let fields = StoryboardPromptBuilder(
             project: context.project,
             episode: context.episode,
             scenes: context.episode.scenes,

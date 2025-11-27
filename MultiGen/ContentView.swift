@@ -134,6 +134,11 @@ struct ContentView: View {
                     .environmentObject(scriptStore)
                     .environmentObject(navigationStore)
                     .navigationTitle("角色资料库")
+            } else if item == .imaging {
+                ImagingConsoleView()
+                    .environmentObject(actionCenter)
+                    .environmentObject(promptLibraryStore)
+                    .navigationTitle("影像生成")
             } else if item == .libraryScenes {
                 SceneLibraryView()
                     .environmentObject(scriptStore)
@@ -142,6 +147,11 @@ struct ContentView: View {
             } else {
                 LibraryPlaceholderView(title: item.title)
             }
+        case .imaging:
+            ImagingConsoleView()
+                .environmentObject(actionCenter)
+                .environmentObject(promptLibraryStore)
+                .navigationTitle("影像生成")
         }
     }
 
@@ -151,12 +161,13 @@ enum SidebarItem: String, Identifiable {
     case home
     case script
     case storyboard
+    case imaging
     case libraryStyles
     case libraryCharacters
     case libraryScenes
     case libraryPrompts
 
-    static let primaryItems: [SidebarItem] = [.home, .script, .storyboard]
+    static let primaryItems: [SidebarItem] = [.home, .script, .storyboard, .imaging]
     static let libraryItems: [SidebarItem] = [.libraryStyles, .libraryCharacters, .libraryScenes, .libraryPrompts]
 
     var id: String { rawValue }
@@ -166,6 +177,7 @@ enum SidebarItem: String, Identifiable {
         case .home: return "主页"
         case .script: return "剧本"
         case .storyboard: return "分镜"
+        case .imaging: return "影像"
         case .libraryStyles: return "风格"
         case .libraryCharacters: return "角色"
         case .libraryScenes: return "场景"
@@ -178,6 +190,7 @@ enum SidebarItem: String, Identifiable {
         case .home: return "house"
         case .script: return "book.pages"
         case .storyboard: return "rectangle.3.offgrid"
+        case .imaging: return "photo.stack"
         case .libraryStyles: return "paintpalette"
         case .libraryCharacters: return "person.crop.square"
         case .libraryScenes: return "square.grid.3x3"

@@ -37,7 +37,9 @@ struct ScriptDocxImporter {
         }
         defer { url.stopAccessingSecurityScopedResource() }
 
-        guard let raw = DocxTextExtractor.extractText(from: url) ?? PagesTextExtractor.extractText(from: url) else {
+        guard let raw = DocxTextExtractor.extractText(from: url)
+                ?? PagesTextExtractor.extractText(from: url)
+                ?? PlainTextExtractor.extractText(from: url) else {
             throw ImportError.unsupportedFormat
         }
         let text = normalize(raw)
@@ -113,7 +115,8 @@ struct ScriptDocxImporter {
             let contentStart = match.range.location + match.range.length
             let contentEnd = (index + 1 < matches.count) ? matches[index + 1].range.location : nsText.length
             let bodyRange = NSRange(location: contentStart, length: max(contentEnd - contentStart, 0))
-            let body = nsText.substring(with: bodyRange).trimmingCharacters(in: .whitespacesAndNewlines)
+            let rawBody = nsText.substring(with: bodyRange).trimmingCharacters(in: .whitespacesAndNewlines)
+            let body = stripCharacterLine(from: rawBody)
             let scenes = parseScenes(in: body, episodeNumber: episodeNumber)
             let title = "第\(episodeNumber)集"
             items.append(ScriptDocxImportItem(episodeNumber: episodeNumber, title: title, body: body, scenes: scenes))
@@ -126,8 +129,14 @@ struct ScriptDocxImporter {
         for pattern in episodePatterns {
             if let regex = try? NSRegularExpression(pattern: pattern, options: []) {
                 let matches = regex.matches(in: text, options: [], range: NSRange(location: 0, length: ns.length))
-                if matches.isEmpty == false {
-                    return (regex, matches)
+                let filtered = matches.filter { match in
+                    guard match.numberOfRanges >= 2 else { return false }
+                    let episodeText = ns.substring(with: match.range(at: 1))
+                    // 过滤纯阿拉伯数字（例如“3”）以避免误判
+                    return episodeText.range(of: #"^\d+$"#, options: .regularExpression) == nil
+                }
+                if filtered.isEmpty == false {
+                    return (regex, filtered)
                 }
             }
         }
@@ -182,6 +191,14 @@ struct ScriptDocxImporter {
             normalized = normalized.replacingOccurrences(of: k, with: v)
         }
         return normalized
+    }
+
+    private func stripCharacterLine(from text: String) -> String {
+        let pattern = #"(?m)^\s*人物[:：].*$"#
+        guard let regex = try? NSRegularExpression(pattern: pattern, options: []) else { return text }
+        let range = NSRange(location: 0, length: (text as NSString).length)
+        return regex.stringByReplacingMatches(in: text, options: [], range: range, withTemplate: "")
+            .trimmingCharacters(in: .whitespacesAndNewlines)
     }
 
     private func stripPunctuation(_ text: String) -> String {

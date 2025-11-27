@@ -10,6 +10,12 @@ struct ScriptOverviewView: View {
     let onCreateProject: () -> Void
     let onImportProject: () -> Void
 
+    @State private var draftProductionMembers: [ProductionMember] = []
+    @State private var draftProducerAssignments: [UUID: UUID?] = [:]
+    @State private var draftStartDate: Date?
+    @State private var draftEndDate: Date?
+    @State private var draftProductionTasks: [ProductionTask] = []
+
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 24) {
@@ -18,6 +24,10 @@ struct ScriptOverviewView: View {
             }
             .padding(.horizontal, 24)
             .padding(.vertical, 18)
+        }
+        .onAppear { syncDraftsFromHighlight() }
+        .onChange(of: highlightedProject?.id) { _, _ in
+            syncDraftsFromHighlight()
         }
     }
 
@@ -54,11 +64,19 @@ struct ScriptOverviewView: View {
     @ViewBuilder
     private var highlightPanel: some View {
         if let project = highlightedProject {
-            ProjectInfoPanel(
-                store: store,
-                project: project,
-                accentColor: Color(nsColor: .windowBackgroundColor)
-            )
+            VStack(spacing: 16) {
+                ProductionSummaryRow(
+                    members: $draftProductionMembers,
+                    assignments: $draftProducerAssignments,
+                    tasks: $draftProductionTasks,
+                    episodes: project.orderedEpisodes
+                )
+                ProjectInfoPanel(
+                    store: store,
+                    project: project,
+                    accentColor: Color(nsColor: .windowBackgroundColor)
+                )
+            }
         } else {
             ProjectSelectionPlaceholder(
                 title: "暂无剧本项目",
@@ -71,6 +89,24 @@ struct ScriptOverviewView: View {
 }
 
 private let projectCardColor = Color(nsColor: .windowBackgroundColor)
+
+private extension ScriptOverviewView {
+    func syncDraftsFromHighlight() {
+        guard let project = highlightedProject else {
+            draftProductionMembers = []
+            draftProducerAssignments = [:]
+            draftStartDate = nil
+            draftEndDate = nil
+            draftProductionTasks = []
+            return
+        }
+        draftProductionMembers = project.productionMembers
+        draftProducerAssignments = Dictionary(uniqueKeysWithValues: project.episodes.map { ($0.id, $0.producerID) })
+        draftStartDate = project.productionStartDate
+        draftEndDate = project.productionEndDate
+        draftProductionTasks = project.productionTasks
+    }
+}
 
 struct ProjectSelectionPlaceholder: View {
     let title: String
@@ -200,6 +236,10 @@ struct ProjectInfoPanel: View {
     @State private var draftCharacters: [ProjectCharacterProfile] = []
     @State private var draftScenes: [ProjectSceneProfile] = []
     @State private var newTagDraft: String = ""
+    @State private var draftProductionMembers: [ProductionMember] = []
+    @State private var draftProducerAssignments: [UUID: UUID?] = [:]
+    @State private var draftProductionTasks: [ProductionTask] = []
+    @State private var newMemberName: String = ""
 
     init(store: ScriptStore, project: ScriptProject, accentColor: Color) {
         self.store = store
@@ -212,6 +252,9 @@ struct ProjectInfoPanel: View {
         _draftEndDate = State(initialValue: project.productionEndDate)
         _draftCharacters = State(initialValue: project.mainCharacters)
         _draftScenes = State(initialValue: project.keyScenes)
+        _draftProductionMembers = State(initialValue: project.productionMembers)
+        _draftProducerAssignments = State(initialValue: Dictionary(uniqueKeysWithValues: project.episodes.map { ($0.id, $0.producerID) }))
+        _draftProductionTasks = State(initialValue: project.productionTasks)
     }
 
     var body: some View {
@@ -524,6 +567,15 @@ struct ProjectInfoPanel: View {
             editable.productionEndDate = draftEndDate
             editable.mainCharacters = draftCharacters
             editable.keyScenes = draftScenes
+            editable.productionMembers = draftProductionMembers
+            editable.productionTasks = draftProductionTasks
+            editable.episodes = editable.episodes.map { episode in
+                var updated = episode
+                if let override = draftProducerAssignments[episode.id] {
+                    updated.producerID = override
+                }
+                return updated
+            }
         }
     }
 
@@ -535,6 +587,10 @@ struct ProjectInfoPanel: View {
         draftEndDate = project.productionEndDate
         draftCharacters = project.mainCharacters
         draftScenes = project.keyScenes
+        draftProductionMembers = project.productionMembers
+        draftProducerAssignments = Dictionary(uniqueKeysWithValues: project.episodes.map { ($0.id, $0.producerID) })
+        draftProductionTasks = project.productionTasks
+        newMemberName = ""
     }
 }
 
@@ -556,6 +612,150 @@ extension ProjectInfoPanel {
             let nextIndex = all.index(after: idx)
             return nextIndex < all.endIndex ? all[nextIndex] : all.first!
         }
+    }
+
+    // MARK: - Production Team
+
+    private func productionTeamCard(editing: Bool) -> some View {
+        VStack(alignment: .leading, spacing: 10) {
+            HStack {
+                Text("制作人员")
+                    .font(.headline)
+                Spacer()
+                if editing {
+                    HStack(spacing: 8) {
+                        TextField("姓名", text: $newMemberName)
+                            .textFieldStyle(.roundedBorder)
+                            .frame(width: 160)
+                            .onSubmit(addMember)
+                        Button("添加") { addMember() }
+                            .buttonStyle(.bordered)
+                    }
+                }
+            }
+
+            ScrollView(.horizontal, showsIndicators: false) {
+                HStack(spacing: 10) {
+                    ForEach(draftProductionMembers, id: \.id) { member in
+                        HStack(spacing: 8) {
+                            AvatarCircle(initials: initials(for: member.name), color: color(from: member.colorHex))
+                            Text(member.name.isEmpty ? "未命名" : member.name)
+                                .foregroundStyle(.primary)
+                            if editing {
+                                Button(role: .destructive) {
+                                    draftProductionMembers.removeAll { $0.id == member.id }
+                                    draftProducerAssignments = draftProducerAssignments.mapValues { $0 == member.id ? nil : $0 }
+                                } label: {
+                                    Image(systemName: "xmark.circle.fill")
+                                }
+                                .buttonStyle(.plain)
+                            }
+                        }
+                        .padding(.horizontal, 10)
+                        .padding(.vertical, 6)
+                        .background(RoundedRectangle(cornerRadius: 12, style: .continuous).fill(Color(nsColor: .underPageBackgroundColor)))
+                    }
+                }
+            }
+
+            if project.orderedEpisodes.isEmpty == false {
+                VStack(alignment: .leading, spacing: 8) {
+                    Text("分集制作分配")
+                        .font(.subheadline.bold())
+                    let columns = Array(repeating: GridItem(.flexible(), spacing: 10), count: 3)
+                    LazyVGrid(columns: columns, spacing: 10) {
+                        ForEach(project.orderedEpisodes) { episode in
+                            let assigned = assignedProducer(for: episode)
+                            let tint = assigned.map { color(from: $0.colorHex) } ?? Color(nsColor: .underPageBackgroundColor)
+                            episodeCard(for: episode, assigned: assigned, tint: tint)
+                                .contextMenu {
+                                    Button("未分配") {
+                                        draftProducerAssignments[episode.id] = nil
+                                    }
+                                    ForEach(draftProductionMembers, id: \.id) { member in
+                                        Button(member.name) {
+                                            draftProducerAssignments[episode.id] = member.id
+                                        }
+                                    }
+                                }
+                                .onTapGesture {
+                                    guard draftProductionMembers.isEmpty == false else { return }
+                                    let members = draftProductionMembers
+                                    if let current = assigned,
+                                       let idx = members.firstIndex(where: { $0.id == current.id }) {
+                                        let next = members.index(after: idx)
+                                        draftProducerAssignments[episode.id] = next < members.endIndex ? members[next].id : nil
+                                    } else {
+                                        draftProducerAssignments[episode.id] = members.first?.id
+                                    }
+                                }
+                        }
+                    }
+                }
+            }
+        }
+        .padding(12)
+        .background(
+            RoundedRectangle(cornerRadius: 14, style: .continuous)
+                .fill(Color(nsColor: .underPageBackgroundColor))
+        )
+    }
+
+    private func addMember() {
+        let trimmed = newMemberName.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard trimmed.isEmpty == false else { return }
+        let palette = ["#FF7A00", "#4A90E2", "#7ED321", "#BD10E0", "#F5A623", "#50E3C2", "#D0021B", "#417505"]
+        let color = palette.randomElement() ?? "#4A90E2"
+        draftProductionMembers.append(ProductionMember(name: trimmed, colorHex: color))
+        newMemberName = ""
+    }
+
+    private func assignedProducer(for episode: ScriptEpisode) -> ProductionMember? {
+        let assignedID = draftProducerAssignments[episode.id] ?? episode.producerID
+        return draftProductionMembers.first(where: { $0.id == assignedID })
+    }
+
+    @ViewBuilder
+    private func episodeCard(for episode: ScriptEpisode, assigned: ProductionMember?, tint: Color) -> some View {
+        VStack(alignment: .leading, spacing: 6) {
+            Text(episode.displayLabel)
+                .font(.subheadline.weight(.semibold))
+            if let assigned {
+                HStack(spacing: 6) {
+                    AvatarCircle(initials: initials(for: assigned.name), color: color(from: assigned.colorHex))
+                    Text(assigned.name)
+                        .font(.caption)
+                }
+            } else {
+                Text("未分配")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+        }
+        .padding(10)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(RoundedRectangle(cornerRadius: 12, style: .continuous).fill(tint.opacity(0.2)))
+        .overlay(
+            RoundedRectangle(cornerRadius: 12, style: .continuous)
+                .stroke(tint.opacity(0.5), lineWidth: assigned == nil ? 0.5 : 1)
+        )
+        .contentShape(Rectangle())
+    }
+
+    private func initials(for name: String) -> String {
+        let trimmed = name.trimmingCharacters(in: .whitespacesAndNewlines)
+        if trimmed.isEmpty { return "?" }
+        return String(trimmed.prefix(1))
+    }
+
+    private func color(from hex: String) -> Color {
+        var cleaned = hex.trimmingCharacters(in: .whitespacesAndNewlines).uppercased()
+        if cleaned.hasPrefix("#") { cleaned.removeFirst() }
+        guard cleaned.count == 6, let intVal = Int(cleaned, radix: 16) else { return Color.accentColor }
+        let r = Double((intVal >> 16) & 0xFF) / 255.0
+        let g = Double((intVal >> 8) & 0xFF) / 255.0
+        let b = Double(intVal & 0xFF) / 255.0
+        return Color(red: r, green: g, blue: b)
     }
 }
 
@@ -599,6 +799,19 @@ struct TagChip: View {
             Capsule(style: .continuous)
                 .fill(tint.opacity(0.4))
         )
+    }
+}
+
+struct AvatarCircle: View {
+    let initials: String
+    let color: Color
+
+    var body: some View {
+        Text(initials)
+            .font(.subheadline.weight(.bold))
+            .foregroundStyle(.white)
+            .frame(width: 32, height: 32)
+            .background(Circle().fill(color))
     }
 }
 
@@ -682,22 +895,28 @@ struct PersonaCard: View {
     }
 }
 
+
 struct SceneCard: View {
     let scene: ProjectSceneProfile
     var onTap: (() -> Void)? = nil
     @State private var isExpanded = false
 
+    private func initials(for name: String) -> String {
+        let trimmed = name.trimmingCharacters(in: .whitespacesAndNewlines)
+        return trimmed.isEmpty ? "?" : String(trimmed.prefix(1))
+    }
+    
     private var coverImage: NSImage? {
         guard let data = scene.primaryImageData else { return nil }
         return NSImage(data: data)
     }
-
+    
     private var variantBadge: String {
         let variantCount = scene.variants.count
         let imageCount = scene.variants.flatMap { $0.images }.count
         return "\(variantCount) 视角｜\(imageCount) 图"
     }
-
+    
     var body: some View {
         ZStack(alignment: .bottomLeading) {
             if let image = coverImage {
@@ -720,7 +939,7 @@ struct SceneCard: View {
                 }
                 .frame(width: 220, height: 280)
             }
-
+            
             LinearGradient(
                 colors: [Color.black.opacity(0.5), Color.black.opacity(0.1)],
                 startPoint: .bottom,
@@ -729,7 +948,7 @@ struct SceneCard: View {
             .frame(height: 110)
             .frame(maxWidth: .infinity, alignment: .bottom)
             .allowsHitTesting(false)
-
+            
             VStack(alignment: .leading, spacing: 6) {
                 Text(scene.name.isEmpty ? "未命名场景" : scene.name)
                     .font(.headline)
@@ -742,231 +961,244 @@ struct SceneCard: View {
                         .font(.caption)
                         .foregroundStyle(.white.opacity(0.9))
                         .lineLimit(3)
+                    if scene.characters.isEmpty == false {
+                        HStack(spacing: 6) {
+                            ForEach(scene.characters) { role in
+                                AvatarCircle(initials: initials(for: role.name), color: Color.white.opacity(0.3))
+                                    .frame(width: 24, height: 24)
+                                    .overlay(
+                                        RoundedRectangle(cornerRadius: 12, style: .continuous)
+                                            .stroke(Color.white.opacity(0.6), lineWidth: 1)
+                                    )
+                                    .help(role.name.isEmpty ? "人物" : role.name)
+                            }
+                        }
+                    }
                 }
             }
             .padding(14)
         }
         .frame(width: 220, height: 280)
         .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
-        .shadow(color: .black.opacity(0.12), radius: 12, y: 8)
-        .contentShape(Rectangle())
-        .onTapGesture {
-            if let onTap {
-                onTap()
-            } else {
-                withAnimation(.easeInOut(duration: 0.2)) {
-                    isExpanded.toggle()
+            .shadow(color: .black.opacity(0.12), radius: 12, y: 8)
+            .contentShape(Rectangle())
+            .onTapGesture {
+                if let onTap {
+                    onTap()
+                } else {
+                    withAnimation(.easeInOut(duration: 0.2)) {
+                        isExpanded.toggle()
+                    }
                 }
             }
         }
     }
-}
-
-struct EditablePersonaRow: View {
-    @Binding var character: ProjectCharacterProfile
-    let onDelete: () -> Void
-    @State private var pickerIsRunning = false
-
-    var body: some View {
-        HStack(alignment: .top, spacing: 12) {
-            ZStack {
-                RoundedRectangle(cornerRadius: 10)
-                    .fill(Color.accentColor.opacity(0.12))
-                    .frame(width: 64, height: 64)
-                if let data = character.imageData, let image = NSImage(data: data) {
-                    Image(nsImage: image)
-                        .resizable()
-                        .scaledToFill()
+    
+    struct EditablePersonaRow: View {
+        @Binding var character: ProjectCharacterProfile
+        let onDelete: () -> Void
+        @State private var pickerIsRunning = false
+        
+        var body: some View {
+            HStack(alignment: .top, spacing: 12) {
+                ZStack {
+                    RoundedRectangle(cornerRadius: 10)
+                        .fill(Color.accentColor.opacity(0.12))
                         .frame(width: 64, height: 64)
-                        .clipped()
-                        .clipShape(RoundedRectangle(cornerRadius: 10))
-                } else {
-                    Image(systemName: "person.crop.square")
-                        .foregroundStyle(.secondary)
+                    if let data = character.imageData, let image = NSImage(data: data) {
+                        Image(nsImage: image)
+                            .resizable()
+                            .scaledToFill()
+                            .frame(width: 64, height: 64)
+                            .clipped()
+                            .clipShape(RoundedRectangle(cornerRadius: 10))
+                    } else {
+                        Image(systemName: "person.crop.square")
+                            .foregroundStyle(.secondary)
+                    }
                 }
-            }
-            VStack(alignment: .leading, spacing: 6) {
-                TextField("角色名称", text: $character.name)
-                    .textFieldStyle(.roundedBorder)
-                TextField("角色简介", text: $character.description, axis: .vertical)
-                    .textFieldStyle(.roundedBorder)
-                TextField("生成提示词", text: $character.prompt, axis: .vertical)
-                    .textFieldStyle(.roundedBorder)
-                HStack(spacing: 8) {
-                    Button("上传封面") {
-                        pickImage { data in
-                            character.imageData = data
-                            if character.variants.isEmpty {
-                                character.variants = [
-                                    CharacterVariant(
-                                        images: [CharacterImage(data: data, isCover: true)]
-                                    )
-                                ]
-                            } else {
-                                character.variants[0].images.insert(CharacterImage(data: data, isCover: true), at: 0)
-                                character.variants[0].images = updateCoverState(character.variants[0].images)
+                VStack(alignment: .leading, spacing: 6) {
+                    TextField("角色名称", text: $character.name)
+                        .textFieldStyle(.roundedBorder)
+                    TextField("角色简介", text: $character.description, axis: .vertical)
+                        .textFieldStyle(.roundedBorder)
+                    TextField("生成提示词", text: $character.prompt, axis: .vertical)
+                        .textFieldStyle(.roundedBorder)
+                    HStack(spacing: 8) {
+                        Button("上传封面") {
+                            pickImage { data in
+                                character.imageData = data
+                                if character.variants.isEmpty {
+                                    character.variants = [
+                                        CharacterVariant(
+                                            images: [CharacterImage(data: data, isCover: true)]
+                                        )
+                                    ]
+                                } else {
+                                    character.variants[0].images.insert(CharacterImage(data: data, isCover: true), at: 0)
+                                    character.variants[0].images = updateCoverState(character.variants[0].images)
+                                }
                             }
                         }
-                    }
-                    Button("清除封面") {
-                        character.imageData = nil
-                        if character.variants.isEmpty == false {
-                            character.variants[0].images = []
-                        }
-                    }
-                    .disabled(character.imageData == nil)
-                }
-                if character.variants.isEmpty {
-                    Button("添加形态") {
-                        character.variants.append(CharacterVariant())
-                    }
-                }
-                if character.variants.isEmpty == false {
-                    VariantEditor(
-                        variants: $character.variants,
-                        isCharacter: true
-                    )
-                }
-            }
-            Spacer()
-            Button(role: .destructive, action: onDelete) {
-                Image(systemName: "trash")
-            }
-            .buttonStyle(.plain)
-        }
-    }
-
-    private func pickImage(_ handler: @escaping (Data?) -> Void) {
-        guard pickerIsRunning == false else { return }
-        pickerIsRunning = true
-        let panel = NSOpenPanel()
-        panel.canChooseDirectories = false
-        panel.allowsMultipleSelection = false
-        panel.allowedContentTypes = [.jpeg, .png, .tiff, .heic]
-        if panel.runModal() == .OK, let url = panel.url, let data = try? Data(contentsOf: url) {
-            handler(data)
-        }
-        pickerIsRunning = false
-    }
-
-    private func updateCoverState(_ images: [CharacterImage]) -> [CharacterImage] {
-        guard images.isEmpty == false else { return images }
-        var updated = images
-        for idx in updated.indices {
-            updated[idx].isCover = idx == 0
-        }
-        return updated
-    }
-}
-
-struct EditableSceneRow: View {
-    @Binding var scene: ProjectSceneProfile
-    let onDelete: () -> Void
-    @State private var pickerIsRunning = false
-
-    var body: some View {
-        HStack(alignment: .top, spacing: 12) {
-            ZStack {
-                RoundedRectangle(cornerRadius: 10)
-                    .fill(Color.blue.opacity(0.12))
-                    .frame(width: 64, height: 64)
-                if let data = scene.imageData, let image = NSImage(data: data) {
-                    Image(nsImage: image)
-                        .resizable()
-                        .scaledToFill()
-                        .frame(width: 64, height: 64)
-                        .clipped()
-                        .clipShape(RoundedRectangle(cornerRadius: 10))
-                } else {
-                    Image(systemName: "photo.on.rectangle")
-                        .foregroundStyle(.secondary)
-                }
-            }
-            VStack(alignment: .leading, spacing: 6) {
-                TextField("场景名称", text: $scene.name)
-                    .textFieldStyle(.roundedBorder)
-                TextField("场景简介", text: $scene.description, axis: .vertical)
-                    .textFieldStyle(.roundedBorder)
-                HStack(spacing: 8) {
-                    Button("上传封面") {
-                        pickImage { data in
-                            scene.imageData = data
-                            if scene.variants.isEmpty {
-                                scene.variants = [
-                                    SceneVariant(
-                                        images: [SceneImage(data: data, isCover: true)]
-                                    )
-                                ]
-                            } else {
-                                scene.variants[0].images.insert(SceneImage(data: data, isCover: true), at: 0)
-                                scene.variants[0].images = updateCoverState(scene.variants[0].images)
+                        Button("清除封面") {
+                            character.imageData = nil
+                            if character.variants.isEmpty == false {
+                                character.variants[0].images = []
                             }
                         }
+                        .disabled(character.imageData == nil)
                     }
-                    Button("清除封面") {
-                        scene.imageData = nil
-                        if scene.variants.isEmpty == false {
-                            scene.variants[0].images = []
+                    if character.variants.isEmpty {
+                        Button("添加形态") {
+                            character.variants.append(CharacterVariant())
                         }
                     }
-                    .disabled(scene.imageData == nil)
-                }
-                TextField("生成提示词", text: $scene.prompt, axis: .vertical)
-                    .textFieldStyle(.roundedBorder)
-                if scene.variants.isEmpty {
-                    Button("添加视角/子版本") {
-                        scene.variants.append(SceneVariant())
+                    if character.variants.isEmpty == false {
+                        VariantEditor(
+                            variants: $character.variants,
+                            isCharacter: true
+                        )
                     }
                 }
-                if scene.variants.isEmpty == false {
-                    VariantEditor(
-                        variants: $scene.variants,
-                        isCharacter: false
-                    )
+                Spacer()
+                Button(role: .destructive, action: onDelete) {
+                    Image(systemName: "trash")
                 }
+                .buttonStyle(.plain)
             }
-            Spacer()
-            Button(role: .destructive, action: onDelete) {
-                Image(systemName: "trash")
+        }
+        
+        private func pickImage(_ handler: @escaping (Data?) -> Void) {
+            guard pickerIsRunning == false else { return }
+            pickerIsRunning = true
+            let panel = NSOpenPanel()
+            panel.canChooseDirectories = false
+            panel.allowsMultipleSelection = false
+            panel.allowedContentTypes = [.jpeg, .png, .tiff, .heic]
+            if panel.runModal() == .OK, let url = panel.url, let data = try? Data(contentsOf: url) {
+                handler(data)
             }
-            .buttonStyle(.plain)
+            pickerIsRunning = false
+        }
+        
+        private func updateCoverState(_ images: [CharacterImage]) -> [CharacterImage] {
+            guard images.isEmpty == false else { return images }
+            var updated = images
+            for idx in updated.indices {
+                updated[idx].isCover = idx == 0
+            }
+            return updated
         }
     }
-
-    private func pickImage(_ handler: @escaping (Data?) -> Void) {
-        guard pickerIsRunning == false else { return }
-        pickerIsRunning = true
-        let panel = NSOpenPanel()
-        panel.canChooseDirectories = false
-        panel.allowsMultipleSelection = false
-        panel.allowedContentTypes = [.jpeg, .png, .tiff, .heic]
-        if panel.runModal() == .OK, let url = panel.url, let data = try? Data(contentsOf: url) {
-            handler(data)
+    
+    struct EditableSceneRow: View {
+        @Binding var scene: ProjectSceneProfile
+        let onDelete: () -> Void
+        @State private var pickerIsRunning = false
+        
+        var body: some View {
+            HStack(alignment: .top, spacing: 12) {
+                ZStack {
+                    RoundedRectangle(cornerRadius: 10)
+                        .fill(Color.blue.opacity(0.12))
+                        .frame(width: 64, height: 64)
+                    if let data = scene.imageData, let image = NSImage(data: data) {
+                        Image(nsImage: image)
+                            .resizable()
+                            .scaledToFill()
+                            .frame(width: 64, height: 64)
+                            .clipped()
+                            .clipShape(RoundedRectangle(cornerRadius: 10))
+                    } else {
+                        Image(systemName: "photo.on.rectangle")
+                            .foregroundStyle(.secondary)
+                    }
+                }
+                VStack(alignment: .leading, spacing: 6) {
+                    TextField("场景名称", text: $scene.name)
+                        .textFieldStyle(.roundedBorder)
+                    TextField("场景简介", text: $scene.description, axis: .vertical)
+                        .textFieldStyle(.roundedBorder)
+                    HStack(spacing: 8) {
+                        Button("上传封面") {
+                            pickImage { data in
+                                scene.imageData = data
+                                if scene.variants.isEmpty {
+                                    scene.variants = [
+                                        SceneVariant(
+                                            images: [SceneImage(data: data, isCover: true)]
+                                        )
+                                    ]
+                                } else {
+                                    scene.variants[0].images.insert(SceneImage(data: data, isCover: true), at: 0)
+                                    scene.variants[0].images = updateCoverState(scene.variants[0].images)
+                                }
+                            }
+                        }
+                        Button("清除封面") {
+                            scene.imageData = nil
+                            if scene.variants.isEmpty == false {
+                                scene.variants[0].images = []
+                            }
+                        }
+                        .disabled(scene.imageData == nil)
+                    }
+                    TextField("生成提示词", text: $scene.prompt, axis: .vertical)
+                        .textFieldStyle(.roundedBorder)
+                    if scene.variants.isEmpty {
+                        Button("添加视角/子版本") {
+                            scene.variants.append(SceneVariant())
+                        }
+                    }
+                    if scene.variants.isEmpty == false {
+                        VariantEditor(
+                            variants: $scene.variants,
+                            isCharacter: false
+                        )
+                    }
+                }
+                Spacer()
+                Button(role: .destructive, action: onDelete) {
+                    Image(systemName: "trash")
+                }
+                .buttonStyle(.plain)
+            }
         }
-        pickerIsRunning = false
-    }
-
-    private func updateCoverState(_ images: [SceneImage]) -> [SceneImage] {
-        guard images.isEmpty == false else { return images }
-        var updated = images
-        for idx in updated.indices {
-            updated[idx].isCover = idx == 0
+        
+        private func pickImage(_ handler: @escaping (Data?) -> Void) {
+            guard pickerIsRunning == false else { return }
+            pickerIsRunning = true
+            let panel = NSOpenPanel()
+            panel.canChooseDirectories = false
+            panel.allowsMultipleSelection = false
+            panel.allowedContentTypes = [.jpeg, .png, .tiff, .heic]
+            if panel.runModal() == .OK, let url = panel.url, let data = try? Data(contentsOf: url) {
+                handler(data)
+            }
+            pickerIsRunning = false
         }
-        return updated
+        
+        private func updateCoverState(_ images: [SceneImage]) -> [SceneImage] {
+            guard images.isEmpty == false else { return images }
+            var updated = images
+            for idx in updated.indices {
+                updated[idx].isCover = idx == 0
+            }
+            return updated
+        }
     }
-}
-
-struct ProjectTagPill: View {
-    let text: String
-
-    var body: some View {
-        Text(text)
-            .font(.caption)
-            .padding(.horizontal, 8)
-            .padding(.vertical, 4)
-            .background(
-                Capsule(style: .continuous)
-                    .fill(Color.primary.opacity(0.08))
-            )
+    
+    struct ProjectTagPill: View {
+        let text: String
+        
+        var body: some View {
+            Text(text)
+                .font(.caption)
+                .padding(.horizontal, 8)
+                .padding(.vertical, 4)
+                .background(
+                    Capsule(style: .continuous)
+                        .fill(Color.primary.opacity(0.08))
+                )
+        }
     }
-}

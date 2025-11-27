@@ -70,8 +70,13 @@ struct ScriptEpisode: Identifiable, Codable, Hashable {
     var synopsis: String
     var markdown: String
     var scenes: [ScriptScene]
+    var producerID: UUID?
     var createdAt: Date
     var updatedAt: Date
+
+    enum CodingKeys: String, CodingKey {
+        case id, episodeNumber, title, synopsis, markdown, scenes, producerID, createdAt, updatedAt
+    }
 
     init(
         id: UUID = UUID(),
@@ -80,6 +85,7 @@ struct ScriptEpisode: Identifiable, Codable, Hashable {
         synopsis: String = "",
         markdown: String,
         scenes: [ScriptScene] = [],
+        producerID: UUID? = nil,
         createdAt: Date = .now,
         updatedAt: Date = .now
     ) {
@@ -89,6 +95,7 @@ struct ScriptEpisode: Identifiable, Codable, Hashable {
         self.synopsis = synopsis
         self.markdown = markdown
         self.scenes = scenes
+        self.producerID = producerID
         self.createdAt = createdAt
         self.updatedAt = updatedAt
     }
@@ -96,6 +103,32 @@ struct ScriptEpisode: Identifiable, Codable, Hashable {
     var displayLabel: String {
         if title.isEmpty == false { return title }
         return episodeNumber <= 1 ? "整片" : "第\(episodeNumber)集"
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        id = try container.decode(UUID.self, forKey: .id)
+        episodeNumber = try container.decode(Int.self, forKey: .episodeNumber)
+        title = try container.decodeIfPresent(String.self, forKey: .title) ?? ""
+        synopsis = try container.decodeIfPresent(String.self, forKey: .synopsis) ?? ""
+        markdown = try container.decodeIfPresent(String.self, forKey: .markdown) ?? ""
+        scenes = try container.decodeIfPresent([ScriptScene].self, forKey: .scenes) ?? []
+        producerID = try container.decodeIfPresent(UUID.self, forKey: .producerID)
+        createdAt = try container.decode(Date.self, forKey: .createdAt)
+        updatedAt = try container.decode(Date.self, forKey: .updatedAt)
+    }
+
+    func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(id, forKey: .id)
+        try container.encode(episodeNumber, forKey: .episodeNumber)
+        try container.encode(title, forKey: .title)
+        try container.encode(synopsis, forKey: .synopsis)
+        try container.encode(markdown, forKey: .markdown)
+        try container.encode(scenes, forKey: .scenes)
+        try container.encode(producerID, forKey: .producerID)
+        try container.encode(createdAt, forKey: .createdAt)
+        try container.encode(updatedAt, forKey: .updatedAt)
     }
 }
 
@@ -160,6 +193,7 @@ struct ProjectSceneProfile: Identifiable, Codable, Hashable {
     var name: String
     var description: String
     var prompt: String
+    var characters: [SceneCharacter]
     var imageData: Data?
     var variants: [SceneVariant]
 
@@ -168,6 +202,7 @@ struct ProjectSceneProfile: Identifiable, Codable, Hashable {
         name: String = "",
         description: String = "",
         prompt: String = "",
+        characters: [SceneCharacter] = [],
         imageData: Data? = nil,
         variants: [SceneVariant] = []
     ) {
@@ -175,12 +210,13 @@ struct ProjectSceneProfile: Identifiable, Codable, Hashable {
         self.name = name
         self.description = description
         self.prompt = prompt
+        self.characters = characters
         self.imageData = imageData
         self.variants = variants
     }
 
     enum CodingKeys: String, CodingKey {
-        case id, name, description, prompt, imageData, variants
+        case id, name, description, prompt, characters, imageData, variants
     }
 
     init(from decoder: Decoder) throws {
@@ -189,6 +225,7 @@ struct ProjectSceneProfile: Identifiable, Codable, Hashable {
         name = try container.decodeIfPresent(String.self, forKey: .name) ?? ""
         description = try container.decodeIfPresent(String.self, forKey: .description) ?? ""
         prompt = try container.decodeIfPresent(String.self, forKey: .prompt) ?? ""
+        characters = try container.decodeIfPresent([SceneCharacter].self, forKey: .characters) ?? []
         imageData = try container.decodeIfPresent(Data.self, forKey: .imageData)
         variants = try container.decodeIfPresent([SceneVariant].self, forKey: .variants) ?? []
     }
@@ -206,6 +243,7 @@ struct ProjectSceneProfile: Identifiable, Codable, Hashable {
         try container.encode(name, forKey: .name)
         try container.encode(description, forKey: .description)
         try container.encode(prompt, forKey: .prompt)
+        try container.encode(characters, forKey: .characters)
         try container.encodeIfPresent(imageData, forKey: .imageData)
         try container.encode(variants, forKey: .variants)
     }
@@ -328,6 +366,8 @@ struct ScriptProject: Identifiable, Codable, Hashable {
     var mainCharacters: [ProjectCharacterProfile]
     var keyScenes: [ProjectSceneProfile]
     var episodeOutlines: [EpisodeOutline]
+    var productionMembers: [ProductionMember]
+    var productionTasks: [ProductionTask]
     var createdAt: Date
     var updatedAt: Date
     var episodes: [ScriptEpisode]
@@ -344,6 +384,8 @@ struct ScriptProject: Identifiable, Codable, Hashable {
         mainCharacters: [ProjectCharacterProfile] = [],
         keyScenes: [ProjectSceneProfile] = [],
         episodeOutlines: [EpisodeOutline] = [],
+        productionMembers: [ProductionMember] = [],
+        productionTasks: [ProductionTask] = [],
         createdAt: Date = .now,
         updatedAt: Date = .now,
         episodes: [ScriptEpisode] = []
@@ -359,13 +401,15 @@ struct ScriptProject: Identifiable, Codable, Hashable {
         self.mainCharacters = mainCharacters
         self.keyScenes = keyScenes
         self.episodeOutlines = episodeOutlines
+        self.productionMembers = productionMembers
+        self.productionTasks = productionTasks
         self.createdAt = createdAt
         self.updatedAt = updatedAt
         self.episodes = episodes
     }
 
     enum CodingKeys: String, CodingKey {
-        case id, title, synopsis, tags, type, productionStartDate, productionEndDate, notes, mainCharacters, keyScenes, episodeOutlines, createdAt, updatedAt, episodes
+        case id, title, synopsis, tags, type, productionStartDate, productionEndDate, notes, mainCharacters, keyScenes, episodeOutlines, productionMembers, productionTasks, createdAt, updatedAt, episodes
     }
 
     init(from decoder: Decoder) throws {
@@ -381,6 +425,8 @@ struct ScriptProject: Identifiable, Codable, Hashable {
         mainCharacters = try container.decodeIfPresent([ProjectCharacterProfile].self, forKey: .mainCharacters) ?? []
         keyScenes = try container.decodeIfPresent([ProjectSceneProfile].self, forKey: .keyScenes) ?? []
         episodeOutlines = try container.decodeIfPresent([EpisodeOutline].self, forKey: .episodeOutlines) ?? []
+        productionMembers = try container.decodeIfPresent([ProductionMember].self, forKey: .productionMembers) ?? []
+        productionTasks = try container.decodeIfPresent([ProductionTask].self, forKey: .productionTasks) ?? []
         createdAt = try container.decode(Date.self, forKey: .createdAt)
         updatedAt = try container.decode(Date.self, forKey: .updatedAt)
         episodes = try container.decodeIfPresent([ScriptEpisode].self, forKey: .episodes) ?? []
@@ -398,6 +444,8 @@ struct ScriptProject: Identifiable, Codable, Hashable {
         try container.encode(notes, forKey: .notes)
         try container.encode(mainCharacters, forKey: .mainCharacters)
         try container.encode(keyScenes, forKey: .keyScenes)
+        try container.encode(productionMembers, forKey: .productionMembers)
+        try container.encode(productionTasks, forKey: .productionTasks)
         try container.encode(createdAt, forKey: .createdAt)
         try container.encode(updatedAt, forKey: .updatedAt)
         try container.encode(episodes, forKey: .episodes)
@@ -414,6 +462,18 @@ struct ScriptProject: Identifiable, Codable, Hashable {
 
     var isEpisodic: Bool {
         type == .episodic || episodes.count > 1
+    }
+}
+
+struct ProductionMember: Identifiable, Codable, Hashable {
+    let id: UUID
+    var name: String
+    var colorHex: String
+
+    init(id: UUID = UUID(), name: String, colorHex: String) {
+        self.id = id
+        self.name = name
+        self.colorHex = colorHex
     }
 }
 
@@ -442,7 +502,8 @@ final class ScriptStore: ObservableObject {
         synopsis: String,
         type: ScriptProject.ProjectType,
         mainCharacters: [ProjectCharacterProfile] = [],
-        outlines: [EpisodeOutline] = []
+        outlines: [EpisodeOutline] = [],
+        addDefaultEpisode: Bool = true
     ) -> ScriptProject {
         var project = ScriptProject(
             title: title.isEmpty ? "未命名项目" : title,
@@ -452,7 +513,7 @@ final class ScriptStore: ObservableObject {
             mainCharacters: mainCharacters,
             episodeOutlines: outlines
         )
-        if project.episodes.isEmpty {
+        if addDefaultEpisode, project.episodes.isEmpty {
             project.episodes = [
                 ScriptEpisode(
                     episodeNumber: 1,

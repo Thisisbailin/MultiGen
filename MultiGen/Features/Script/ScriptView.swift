@@ -30,12 +30,15 @@ struct ScriptView: View {
     @State private var showingSceneCreationSheet = false
 
     @State private var isImportingProject = false
+    @State private var importInProgress = false
+    @State private var importProgressMessage = "正在准备导入…"
 
     private let docxContentTypes: [UTType] = {
         var types: [UTType] = []
         if let docx = UTType(filenameExtension: "docx") { types.append(docx) }
         if let doc = UTType(filenameExtension: "doc") { types.append(doc) }
         if let pages = UTType(filenameExtension: "pages") { types.append(pages) }
+        if let txt = UTType(filenameExtension: "txt") { types.append(txt) }
         if let mw = UTType("com.microsoft.word.doc") {
             types.append(mw)
         }
@@ -159,6 +162,16 @@ struct ScriptView: View {
             allowsMultipleSelection: false
         ) { result in
             handleImportResult(result)
+        }
+        .sheet(isPresented: $importInProgress) {
+            VStack(spacing: 16) {
+                ProgressView()
+                Text(importProgressMessage)
+                    .font(.callout)
+                    .foregroundStyle(.secondary)
+            }
+            .padding(24)
+            .frame(minWidth: 320, minHeight: 200)
         }
     }
 
@@ -411,64 +424,103 @@ struct ScriptView: View {
                 importErrorMessage = "未选择任何文件。"
                 return
             }
-            do {
-                let importer = ScriptDocxImporter()
-                let payload = try importer.parseDocument(at: url)
-                guard payload.episodes.isEmpty == false else {
-                    importErrorMessage = "未在文档中找到“第X集”标记，请检查格式。"
-                    return
-                }
-                let projectName = url.deletingPathExtension().lastPathComponent
-                let project = store.addProject(
-                    title: projectName,
-                    synopsis: payload.synopsis,
-                    type: payload.episodes.count > 1 ? .episodic : .standalone,
-                    mainCharacters: payload.characters,
-                    outlines: payload.outlines
-                )
-                for item in payload.episodes {
-                    let episodeMarkdown: String
-                    if item.scenes.isEmpty {
-                        episodeMarkdown = item.body
-                    } else {
-                        episodeMarkdown = item.scenes
-                            .map { $0.body }
-                            .joined(separator: "\n\n")
+            importInProgress = true
+            importProgressMessage = "正在读取文档…"
+            Task {
+                do {
+                    let importer = ScriptDocxImporter()
+                    let payload = try importer.parseDocument(at: url)
+                    await MainActor.run {
+                        importProgressMessage = "正在写入项目…"
                     }
-
-                    if let episode = store.addEpisode(to: project.id, number: item.episodeNumber, title: item.title, markdown: episodeMarkdown) {
-                        let scenes: [ScriptScene]
+                    let synopsisOK = payload.synopsis.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty == false
+                    let charactersOK = payload.characters.isEmpty == false
+                    let episodesOK = payload.episodes.isEmpty == false
+                    let outlinesOK = payload.outlines.isEmpty == false
+                    guard episodesOK else {
+                        await MainActor.run {
+                            importErrorMessage = "未在文档中找到“第X集”标记，请检查格式。"
+                            importInProgress = false
+                        }
+                        return
+                    }
+                let projectName = url.deletingPathExtension().lastPathComponent
+                let project = await MainActor.run {
+                    store.addProject(
+                        title: projectName,
+                        synopsis: payload.synopsis,
+                        type: payload.episodes.count > 1 ? .episodic : .standalone,
+                        mainCharacters: payload.characters,
+                        outlines: payload.outlines,
+                        addDefaultEpisode: false
+                    )
+                }
+                    await MainActor.run {
+                        store.updateProject(id: project.id) { editable in
+                            editable.synopsis = payload.synopsis
+                            editable.notes = payload.synopsis
+                            editable.productionStartDate = editable.productionStartDate ?? Date()
+                            editable.productionTasks = []
+                        }
+                    }
+                    for (idx, item) in payload.episodes.enumerated() {
+                        await MainActor.run {
+                            importProgressMessage = "导入第 \(item.episodeNumber) 集（\(idx + 1)/\(payload.episodes.count)）…"
+                        }
+                        let episodeMarkdown: String
                         if item.scenes.isEmpty {
-                            scenes = [
-                                ScriptScene(
-                                    order: 1,
-                                    title: "未命名场景",
-                                    summary: "",
-                                    body: item.body
-                                )
-                            ]
+                            episodeMarkdown = item.body
                         } else {
-                            scenes = item.scenes.map { scene in
-                                ScriptScene(
-                                    order: scene.index,
-                                    title: scene.title,
-                                    summary: "",
-                                    body: scene.body,
-                                    locationHint: scene.locationHint,
-                                    timeHint: scene.timeHint
-                                )
+                            episodeMarkdown = item.scenes
+                                .map { $0.body }
+                                .joined(separator: "\n\n")
+                        }
+
+                        if let episode = await MainActor.run(body: {
+                            store.addEpisode(to: project.id, number: item.episodeNumber, title: item.title, markdown: episodeMarkdown)
+                        }) {
+                            let scenes: [ScriptScene]
+                            if item.scenes.isEmpty {
+                                scenes = [
+                                    ScriptScene(
+                                        order: 1,
+                                        title: "未命名场景",
+                                        summary: "",
+                                        body: item.body
+                                    )
+                                ]
+                            } else {
+                                scenes = item.scenes.map { scene in
+                                    ScriptScene(
+                                        order: scene.index,
+                                        title: scene.title,
+                                        summary: "",
+                                        body: scene.body,
+                                        locationHint: scene.locationHint,
+                                        timeHint: scene.timeHint
+                                    )
+                                }
+                            }
+                            await MainActor.run {
+                                store.updateEpisode(projectID: project.id, episodeID: episode.id) { editable in
+                                    editable.scenes = scenes
+                                }
                             }
                         }
-                        store.updateEpisode(projectID: project.id, episodeID: episode.id) { editable in
-                            editable.scenes = scenes
-                        }
+                    }
+                    await MainActor.run {
+                        highlightedProjectID = project.id
+                        selectedProjectID = project.id
+                        selectedEpisodeID = store.project(id: project.id)?.orderedEpisodes.first?.id
+                        importInProgress = false
+                        importProgressMessage = "导入完成：简介\(synopsisOK ? "成功" : "缺失")，人物\(charactersOK ? "成功" : "缺失")，分集\(episodesOK ? "成功" : "失败")，大纲\(outlinesOK ? "成功" : "缺失")"
+                    }
+                } catch {
+                    await MainActor.run {
+                        importErrorMessage = error.localizedDescription
+                        importInProgress = false
                     }
                 }
-                highlightedProjectID = project.id
-                selectedProjectID = project.id
-                selectedEpisodeID = store.project(id: project.id)?.orderedEpisodes.first?.id
-            } catch {
-                importErrorMessage = error.localizedDescription
             }
         case .failure(let error):
             if (error as? CocoaError)?.code != .userCancelled {

@@ -195,7 +195,10 @@ private struct SceneTextEditor: NSViewRepresentable {
         textView.isVerticallyResizable = true
         textView.isHorizontallyResizable = false
         textView.textContainerInset = NSSize(width: 4, height: 4)
-        textView.font = NSFont.preferredFont(forTextStyle: .body)
+        // 统一使用系统正文字体与固定字号，保证导入剧本文本的可读性
+        let font = NSFont.systemFont(ofSize: 16)
+        textView.font = font
+        textView.typingAttributes = [.font: font]
         textView.delegate = context.coordinator
         textView.backgroundColor = .clear
         textView.string = text
