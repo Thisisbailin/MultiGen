@@ -11,89 +11,72 @@ struct ChatBubble: View {
         HStack {
             if message.role == .user { Spacer(minLength: 0) }
             VStack(alignment: .leading, spacing: 8) {
-                VStack(alignment: .leading, spacing: 4) {
-                    Text(message.role.displayName)
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                    Text(message.text)
-                        .font(.body)
-                        .foregroundStyle(foregroundColor)
-                    if message.images.isEmpty,
-                       let remoteURL = extractImageURL(from: message.text) {
-                        AsyncImage(url: remoteURL) { phase in
-                            switch phase {
-                            case .empty:
-                                HStack {
-                                    ProgressView()
-                                    Text("正在加载图片…")
-                                }
-                                .padding(8)
-                                .background(Color.black.opacity(0.05))
-                                .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
-                            case .success(let image):
-                                image
-                                    .resizable()
-                                    .scaledToFit()
-                                    .frame(maxWidth: 260)
-                                    .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
-                            case .failure:
-                                Text("图片加载失败")
-                                    .font(.caption)
-                                    .foregroundStyle(.secondary)
-                            @unknown default:
-                                EmptyView()
-                            }
-                        }
-                    }
-                    if message.images.isEmpty == false {
-                        ScrollView(.horizontal, showsIndicators: false) {
-                            HStack(spacing: 10) {
-                                ForEach(message.images, id: \.self) { image in
-                                    Image(nsImage: image)
-                                        .resizable()
-                                        .scaledToFill()
-                                        .frame(width: 140, height: 140)
-                                        .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
-                                        .overlay(
-                                            RoundedRectangle(cornerRadius: 12, style: .continuous)
-                                                .stroke(Color.secondary.opacity(0.2))
-                                        )
-                                        .onTapGesture { onImageTap(image) }
-                                }
-                            }
-                        }
-                        .frame(maxHeight: 160)
-                    }
-                }
-                if let detail = message.detail {
-                    Button(action: onToggleDetail) {
-                        Label(isExpanded ? "收起操作详情" : "查看操作详情", systemImage: isExpanded ? "chevron.up.circle" : "chevron.down.circle")
-                            .font(.caption)
-                    }
-                    .buttonStyle(.plain)
-                    if isExpanded {
-                        ScrollView(.vertical, showsIndicators: true) {
-                            Text(detail)
-                                .font(.caption.monospaced())
-                                .textSelection(.enabled)
-                                .frame(maxWidth: .infinity, alignment: .leading)
-                        }
-                        .frame(maxHeight: 140)
-                        .padding(10)
-                        .background(
-                            RoundedRectangle(cornerRadius: 12, style: .continuous)
-                                .fill(Color.black.opacity(0.05))
-                        )
-                    }
+                bubbleContent
+                if hasAttachments {
+                    attachmentStrip
                 }
             }
-            .padding(12)
-            .background(
-                RoundedRectangle(cornerRadius: 16, style: .continuous)
-                    .fill(backgroundColor)
-            )
+            .frame(maxWidth: 520, alignment: .leading)
+            .frame(maxWidth: .infinity, alignment: message.role == .user ? .trailing : .leading)
             if message.role != .user { Spacer(minLength: 0) }
         }
+    }
+
+    private var bubbleContent: some View {
+        VStack(alignment: .leading, spacing: 4) {
+            Text(message.role.displayName)
+                .font(.caption)
+                .foregroundStyle(.secondary)
+            Text(message.text)
+                .font(.body)
+                .foregroundStyle(foregroundColor)
+                .textSelection(.enabled)
+            if let detail = message.detail {
+                Button(action: onToggleDetail) {
+                    Label(isExpanded ? "收起操作详情" : "查看操作详情", systemImage: isExpanded ? "chevron.up.circle" : "chevron.down.circle")
+                        .font(.caption)
+                }
+                .buttonStyle(.plain)
+                if isExpanded {
+                    ScrollView(.vertical, showsIndicators: true) {
+                        Text(detail)
+                            .font(.caption.monospaced())
+                            .textSelection(.enabled)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                    }
+                    .frame(maxHeight: 140)
+                    .padding(10)
+                    .background(
+                        RoundedRectangle(cornerRadius: 12, style: .continuous)
+                            .fill(Color.black.opacity(0.05))
+                    )
+                }
+            }
+        }
+        .padding(12)
+        .background(
+            RoundedRectangle(cornerRadius: 16, style: .continuous)
+                .fill(backgroundColor)
+        )
+    }
+
+    private var attachmentStrip: some View {
+        ScrollView(.horizontal, showsIndicators: false) {
+            HStack(spacing: 10) {
+                ForEach(Array(message.images.enumerated()), id: \.offset) { _, image in
+                    AttachmentCard(image: image)
+                        .onTapGesture { onImageTap(image) }
+                }
+                if message.images.isEmpty, let remoteURL = extractImageURL(from: message.text) {
+                    RemoteAttachmentCard(url: remoteURL)
+                }
+            }
+            .padding(.horizontal, 2)
+        }
+    }
+
+    private var hasAttachments: Bool {
+        message.images.isEmpty == false || extractImageURL(from: message.text) != nil
     }
 
     private var backgroundColor: Color {
@@ -138,6 +121,66 @@ struct ChatBubble: View {
         guard let match = results.first, match.numberOfRanges >= 2 else { return nil }
         let urlString = nsText.substring(with: match.range(at: 1)).replacingOccurrences(of: "\\", with: "")
         return URL(string: urlString)
+    }
+}
+
+private struct AttachmentCard: View {
+    let image: NSImage
+
+    var body: some View {
+        Image(nsImage: image)
+            .resizable()
+            .scaledToFill()
+            .frame(width: 132, height: 100)
+            .clipped()
+            .background(
+                RoundedRectangle(cornerRadius: 12, style: .continuous)
+                    .fill(Color(nsColor: .windowBackgroundColor))
+            )
+            .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+            .overlay(
+                RoundedRectangle(cornerRadius: 12, style: .continuous)
+                    .stroke(Color.secondary.opacity(0.2))
+            )
+    }
+}
+
+private struct RemoteAttachmentCard: View {
+    let url: URL
+
+    var body: some View {
+        AsyncImage(url: url) { phase in
+            switch phase {
+            case .empty:
+                ProgressView()
+                    .frame(width: 132, height: 100)
+            case .success(let image):
+                image
+                    .resizable()
+                    .scaledToFill()
+                    .frame(width: 132, height: 100)
+                    .clipped()
+            case .failure:
+                VStack(spacing: 6) {
+                    Image(systemName: "exclamationmark.triangle")
+                    Text("图片加载失败")
+                        .font(.caption2)
+                        .multilineTextAlignment(.center)
+                }
+                .frame(width: 132, height: 100)
+            @unknown default:
+                EmptyView()
+            }
+        }
+        .background(
+            RoundedRectangle(cornerRadius: 12, style: .continuous)
+                .fill(Color(nsColor: .windowBackgroundColor))
+        )
+        .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+        .overlay(
+            RoundedRectangle(cornerRadius: 12, style: .continuous)
+                .stroke(Color.secondary.opacity(0.2))
+        )
     }
 }
 
@@ -236,6 +279,40 @@ struct ChatInputBar: View {
             .buttonStyle(.plain)
             .disabled(isSending || inputText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
         }
+    }
+}
+
+struct ImagePreviewSheet: View {
+    let image: NSImage
+    var onClose: () -> Void
+
+    var body: some View {
+        ZStack(alignment: .topTrailing) {
+            Color.black.opacity(0.9).ignoresSafeArea()
+            GeometryReader { geo in
+                ScrollView([.vertical, .horizontal]) {
+                    Image(nsImage: image)
+                        .resizable()
+                        .scaledToFit()
+                        .frame(
+                            maxWidth: max(320, geo.size.width - 80),
+                            maxHeight: max(240, geo.size.height - 120)
+                        )
+                        .padding()
+                }
+            }
+
+            Button {
+                onClose()
+            } label: {
+                Label("关闭", systemImage: "xmark.circle.fill")
+                    .labelStyle(.titleAndIcon)
+                    .padding(10)
+            }
+            .buttonStyle(.borderedProminent)
+            .padding()
+        }
+        .frame(minWidth: 500, minHeight: 400)
     }
 }
 

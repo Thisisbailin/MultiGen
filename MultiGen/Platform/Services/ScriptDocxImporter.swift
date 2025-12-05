@@ -92,7 +92,7 @@ struct ScriptDocxImporter {
     }
 
     private func parseEpisodes(from text: String) -> [ScriptDocxImportItem] {
-        guard let (regex, matches) = firstEpisodeMatches(in: text) else {
+        guard let (_, matches) = firstEpisodeMatches(in: text) else {
             let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
             guard trimmed.isEmpty == false else { return [] }
             return [

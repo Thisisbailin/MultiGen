@@ -82,15 +82,7 @@ struct AIChatSidebarView: View {
         }
         .sheet(isPresented: Binding(get: { previewImage != nil }, set: { if $0 == false { previewImage = nil } })) {
             if let image = previewImage {
-                VStack {
-                    ScrollView([.vertical, .horizontal]) {
-                        Image(nsImage: image)
-                            .resizable()
-                            .scaledToFit()
-                            .padding()
-                    }
-                }
-                .frame(minWidth: 500, minHeight: 400)
+                ImagePreviewSheet(image: image) { previewImage = nil }
             }
         }
     }

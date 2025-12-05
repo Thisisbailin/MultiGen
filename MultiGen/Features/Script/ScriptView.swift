@@ -11,13 +11,15 @@ import AppKit
 
 struct ScriptView: View {
     @EnvironmentObject private var store: ScriptStore
+    @EnvironmentObject private var actionCenter: AIActionCenter
+    @EnvironmentObject private var promptLibraryStore: PromptLibraryStore
+    @EnvironmentObject private var storyboardStore: StoryboardStore
     @EnvironmentObject private var navigationStore: NavigationStore
 
     @State private var highlightedProjectID: UUID?
     @State private var selectedProjectID: UUID?
     @State private var selectedEpisodeID: UUID?
 
-    @State private var showingNewProjectSheet = false
     @State private var projectPendingDeletion: ScriptProject?
     @State private var episodePendingDeletion: (projectID: UUID, episode: ScriptEpisode)?
 
@@ -32,6 +34,10 @@ struct ScriptView: View {
     @State private var isImportingProject = false
     @State private var importInProgress = false
     @State private var importProgressMessage = "正在准备导入…"
+    @State private var showingBatchStoryboardWizard = false
+    @State private var batchFlow: BatchStoryboardFlowStore?
+    @State private var showingImportOverwriteConfirm = false
+    @State private var pendingImportPayload: ScriptImportPayload?
 
     private let docxContentTypes: [UTType] = {
         var types: [UTType] = []
@@ -49,7 +55,14 @@ struct ScriptView: View {
     }()
 
     private var projects: [ScriptProject] {
-        store.projects.sorted { $0.updatedAt > $1.updatedAt }
+        store.containers
+            .compactMap { container in
+                if let script = container.script {
+                    return script
+                }
+                return store.ensureScript(projectID: container.id, type: .standalone)
+            }
+            .sorted { $0.updatedAt > $1.updatedAt }
     }
 
     private var highlightedProject: ScriptProject? {
@@ -91,12 +104,18 @@ struct ScriptView: View {
             if highlightedProjectID == nil {
                 highlightedProjectID = navigationStore.currentScriptProjectID ?? projects.first?.id
             }
+            if let current = selectedProjectID {
+                _ = store.ensureScript(projectID: current, type: .standalone)
+            }
         }
         .onChange(of: selectedEpisodeID) { _, newValue in
             navigationStore.currentScriptEpisodeID = newValue
         }
         .onChange(of: selectedProjectID) { _, newValue in
             navigationStore.currentScriptProjectID = newValue
+            if let id = newValue {
+                _ = store.ensureScript(projectID: id, type: .standalone)
+            }
             if newValue == nil {
                 navigationStore.currentScriptEpisodeID = nil
             }
@@ -135,15 +154,6 @@ struct ScriptView: View {
 
     private var sheetWrappedView: some View {
         animatedContent
-        .sheet(isPresented: $showingNewProjectSheet) {
-            NewProjectSheet { title, synopsis, type in
-                let project = store.addProject(title: title, synopsis: synopsis, type: type)
-                highlightedProjectID = project.id
-                selectedProjectID = project.id
-                selectedEpisodeID = project.orderedEpisodes.first?.id
-            }
-            .frame(minWidth: 540, minHeight: 420)
-        }
         .sheet(isPresented: $showingSceneCreationSheet) {
             SceneNameSheet(
                 name: $newSceneName,
@@ -172,6 +182,31 @@ struct ScriptView: View {
             }
             .padding(24)
             .frame(minWidth: 320, minHeight: 200)
+        }
+        .sheet(isPresented: $showingBatchStoryboardWizard, onDismiss: { batchFlow = nil }) {
+            if let flow = ensureBatchFlow() {
+                BatchStoryboardWizardView(flow: flow)
+                    .frame(minWidth: 880, minHeight: 640)
+            } else {
+                Text("请选择项目后再使用批量分镜功能。")
+                    .padding()
+            }
+        }
+        .confirmationDialog(
+            "覆盖当前剧本？",
+            isPresented: $showingImportOverwriteConfirm,
+            titleVisibility: .visible
+        ) {
+            Button("覆盖当前项目的剧本", role: .destructive) {
+                if let payload = pendingImportPayload {
+                    Task { await applyImportedScript(payload) }
+                }
+            }
+            Button("取消", role: .cancel) {
+                pendingImportPayload = nil
+            }
+        } message: {
+            Text("该项目已存在剧本内容，导入将清空并覆盖当前剧本。")
         }
     }
 
@@ -238,7 +273,8 @@ struct ScriptView: View {
         alertWrappedView
         .toolbar {
             ToolbarItemGroup {
-                if let project = selectedProject {
+                let project = selectedProject ?? highlightedProject
+                if let project {
                     Button {
                         selectedProjectID = nil
                         selectedEpisodeID = nil
@@ -276,6 +312,28 @@ struct ScriptView: View {
                     } label: {
                         Label("新增剧集", systemImage: "plus")
                     }
+                    .disabled(selectedEpisode == nil)
+
+                    Button {
+                        startImportScriptIntoSelectedProject()
+                    } label: {
+                        Label("导入剧本", systemImage: "tray.and.arrow.down")
+                    }
+
+                    if let batchProject = selectedProject ?? highlightedProject {
+                        Button {
+                            highlightedProjectID = batchProject.id
+                            batchFlow = BatchStoryboardFlowStore(
+                                project: batchProject,
+                                promptLibraryStore: promptLibraryStore,
+                                actionCenter: actionCenter,
+                                storyboardStore: storyboardStore
+                            )
+                            showingBatchStoryboardWizard = true
+                        } label: {
+                            Label("批量转写分镜", systemImage: "film.stack")
+                        }
+                    }
 
                     Menu {
                         Button("导出 Markdown") {
@@ -286,6 +344,10 @@ struct ScriptView: View {
                             exportEpisode(project: project, episode: selectedEpisode, as: .pdf)
                         }
                         .disabled(selectedEpisode == nil)
+                        Divider()
+                        Button("导出剧本（Word）") {
+                            exportProjectAsWord(project)
+                        }
                     } label: {
                         Label("导出", systemImage: "square.and.arrow.down")
                     }
@@ -300,42 +362,10 @@ struct ScriptView: View {
                     .disabled(selectedEpisode == nil)
                 } else {
                     Button {
-                        showingNewProjectSheet = true
+                        navigationStore.selection = .writing
                     } label: {
-                        Label("新建项目", systemImage: "square.and.pencil")
+                        Label("前往写作创建项目", systemImage: "arrow.right.circle")
                     }
-
-                    Button(action: startImportProject) {
-                        Label("导入项目", systemImage: "tray.and.arrow.down")
-                    }
-
-                    Button {
-                        navigationStore.sidebarMode = .ai
-                        if let project = highlightedProject {
-                            navigationStore.pendingProjectSummaryID = project.id
-                        }
-                    } label: {
-                        Label("项目总结", systemImage: "text.alignleft")
-                    }
-                    .disabled(highlightedProject == nil)
-
-                    Button {
-                        if let project = highlightedProject {
-                            exportProjectAsWord(project)
-                        }
-                    } label: {
-                        Label("导出项目", systemImage: "square.and.arrow.up")
-                    }
-                    .disabled(highlightedProject == nil)
-
-                    Button(role: .destructive) {
-                        if let project = highlightedProject {
-                            projectPendingDeletion = project
-                        }
-                    } label: {
-                        Label("删除项目", systemImage: "trash")
-                    }
-                    .disabled(highlightedProject == nil)
                 }
             }
         }
@@ -361,8 +391,8 @@ struct ScriptView: View {
                     selectedProjectID = project.id
                     selectedEpisodeID = project.orderedEpisodes.first?.id
                 },
-                onCreateProject: { showingNewProjectSheet = true },
-                onImportProject: startImportProject
+                onCreateProject: { navigationStore.selection = .writing },
+                onImportProject: { navigationStore.selection = .writing }
             )
         }
     }
@@ -390,7 +420,11 @@ struct ScriptView: View {
         }
     }
 
-    private func startImportProject() {
+    private func startImportScriptIntoSelectedProject() {
+        guard selectedProjectID != nil else {
+            importErrorMessage = "请先选择项目，再导入剧本。"
+            return
+        }
         isImportingProject = true
     }
 
@@ -420,6 +454,11 @@ struct ScriptView: View {
     private func handleImportResult(_ result: Result<[URL], Error>) {
         switch result {
         case .success(let urls):
+            importErrorMessage = nil
+            guard let targetProjectID = selectedProjectID else {
+                importErrorMessage = "请先选择项目，再导入剧本。"
+                return
+            }
             guard let url = urls.first else {
                 importErrorMessage = "未选择任何文件。"
                 return
@@ -431,12 +470,9 @@ struct ScriptView: View {
                     let importer = ScriptDocxImporter()
                     let payload = try importer.parseDocument(at: url)
                     await MainActor.run {
-                        importProgressMessage = "正在写入项目…"
+                        importProgressMessage = "校验当前剧本…"
                     }
-                    let synopsisOK = payload.synopsis.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty == false
-                    let charactersOK = payload.characters.isEmpty == false
                     let episodesOK = payload.episodes.isEmpty == false
-                    let outlinesOK = payload.outlines.isEmpty == false
                     guard episodesOK else {
                         await MainActor.run {
                             importErrorMessage = "未在文档中找到“第X集”标记，请检查格式。"
@@ -444,77 +480,15 @@ struct ScriptView: View {
                         }
                         return
                     }
-                let projectName = url.deletingPathExtension().lastPathComponent
-                let project = await MainActor.run {
-                    store.addProject(
-                        title: projectName,
-                        synopsis: payload.synopsis,
-                        type: payload.episodes.count > 1 ? .episodic : .standalone,
-                        mainCharacters: payload.characters,
-                        outlines: payload.outlines,
-                        addDefaultEpisode: false
-                    )
-                }
-                    await MainActor.run {
-                        store.updateProject(id: project.id) { editable in
-                            editable.synopsis = payload.synopsis
-                            editable.notes = payload.synopsis
-                            editable.productionStartDate = editable.productionStartDate ?? Date()
-                            editable.productionTasks = []
-                        }
-                    }
-                    for (idx, item) in payload.episodes.enumerated() {
+                    if scriptHasContent(projectID: targetProjectID) {
                         await MainActor.run {
-                            importProgressMessage = "导入第 \(item.episodeNumber) 集（\(idx + 1)/\(payload.episodes.count)）…"
+                            pendingImportPayload = payload
+                            importInProgress = false
+                            showingImportOverwriteConfirm = true
                         }
-                        let episodeMarkdown: String
-                        if item.scenes.isEmpty {
-                            episodeMarkdown = item.body
-                        } else {
-                            episodeMarkdown = item.scenes
-                                .map { $0.body }
-                                .joined(separator: "\n\n")
-                        }
-
-                        if let episode = await MainActor.run(body: {
-                            store.addEpisode(to: project.id, number: item.episodeNumber, title: item.title, markdown: episodeMarkdown)
-                        }) {
-                            let scenes: [ScriptScene]
-                            if item.scenes.isEmpty {
-                                scenes = [
-                                    ScriptScene(
-                                        order: 1,
-                                        title: "未命名场景",
-                                        summary: "",
-                                        body: item.body
-                                    )
-                                ]
-                            } else {
-                                scenes = item.scenes.map { scene in
-                                    ScriptScene(
-                                        order: scene.index,
-                                        title: scene.title,
-                                        summary: "",
-                                        body: scene.body,
-                                        locationHint: scene.locationHint,
-                                        timeHint: scene.timeHint
-                                    )
-                                }
-                            }
-                            await MainActor.run {
-                                store.updateEpisode(projectID: project.id, episodeID: episode.id) { editable in
-                                    editable.scenes = scenes
-                                }
-                            }
-                        }
+                        return
                     }
-                    await MainActor.run {
-                        highlightedProjectID = project.id
-                        selectedProjectID = project.id
-                        selectedEpisodeID = store.project(id: project.id)?.orderedEpisodes.first?.id
-                        importInProgress = false
-                        importProgressMessage = "导入完成：简介\(synopsisOK ? "成功" : "缺失")，人物\(charactersOK ? "成功" : "缺失")，分集\(episodesOK ? "成功" : "失败")，大纲\(outlinesOK ? "成功" : "缺失")"
-                    }
+                    await applyImportedScript(payload, projectID: targetProjectID)
                 } catch {
                     await MainActor.run {
                         importErrorMessage = error.localizedDescription
@@ -526,6 +500,102 @@ struct ScriptView: View {
             if (error as? CocoaError)?.code != .userCancelled {
                 importErrorMessage = error.localizedDescription
             }
+        }
+    }
+
+    private func scriptHasContent(projectID: UUID) -> Bool {
+        guard let script = store.project(id: projectID) else { return false }
+        let hasEpisodes = script.episodes.contains { episode in
+            episode.markdown.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty == false
+        }
+        return hasEpisodes || script.synopsis.isEmpty == false || script.mainCharacters.isEmpty == false || script.keyScenes.isEmpty == false
+    }
+
+    private func applyImportedScript(_ payload: ScriptImportPayload, projectID: UUID? = nil) async {
+        let targetID = projectID ?? selectedProjectID
+        guard let targetProjectID = targetID else { return }
+        await MainActor.run {
+            importProgressMessage = "正在写入当前项目…"
+            importInProgress = true
+        }
+        let synopsisOK = payload.synopsis.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty == false
+        let charactersOK = payload.characters.isEmpty == false
+        let outlinesOK = payload.outlines.isEmpty == false
+
+        await MainActor.run {
+            store.ensureScript(projectID: targetProjectID, type: payload.episodes.count > 1 ? .episodic : .standalone)
+            store.updateProject(id: targetProjectID) { editable in
+                editable.synopsis = payload.synopsis
+                editable.notes = payload.synopsis
+                editable.mainCharacters = payload.characters
+                editable.keyScenes = payload.episodes.flatMap { $0.scenes }.map {
+                    ProjectSceneProfile(
+                        id: UUID(),
+                        name: $0.title,
+                        description: $0.body
+                    )
+                }
+                editable.episodeOutlines = payload.outlines
+                editable.type = payload.episodes.count > 1 ? .episodic : .standalone
+                editable.productionStartDate = editable.productionStartDate ?? Date()
+                editable.productionTasks = []
+                editable.episodes = []
+            }
+        }
+
+        for (idx, item) in payload.episodes.enumerated() {
+            await MainActor.run {
+                importProgressMessage = "导入第 \(item.episodeNumber) 集（\(idx + 1)/\(payload.episodes.count)）…"
+            }
+            let episodeMarkdown: String
+            if item.scenes.isEmpty {
+                episodeMarkdown = item.body
+            } else {
+                episodeMarkdown = item.scenes
+                    .map { $0.body }
+                    .joined(separator: "\n\n")
+            }
+
+            if let episode = await MainActor.run(body: {
+                store.addEpisode(to: targetProjectID, number: item.episodeNumber, title: item.title, markdown: episodeMarkdown)
+            }) {
+                let scenes: [ScriptScene]
+                if item.scenes.isEmpty {
+                    scenes = [
+                        ScriptScene(
+                            order: 1,
+                            title: "未命名场景",
+                            summary: "",
+                            body: item.body
+                        )
+                    ]
+                } else {
+                    scenes = item.scenes.map { scene in
+                        ScriptScene(
+                            order: scene.index,
+                            title: scene.title,
+                            summary: "",
+                            body: scene.body,
+                            locationHint: scene.locationHint,
+                            timeHint: scene.timeHint
+                        )
+                    }
+                }
+                await MainActor.run {
+                    store.updateEpisode(projectID: targetProjectID, episodeID: episode.id) { editable in
+                        editable.scenes = scenes
+                    }
+                }
+            }
+        }
+
+        await MainActor.run {
+            pendingImportPayload = nil
+            highlightedProjectID = targetProjectID
+            selectedProjectID = targetProjectID
+            selectedEpisodeID = store.project(id: targetProjectID)?.orderedEpisodes.first?.id
+            importInProgress = false
+            importProgressMessage = "导入完成：简介\(synopsisOK ? "成功" : "缺失")，人物\(charactersOK ? "成功" : "缺失")，大纲\(outlinesOK ? "成功" : "缺失")"
         }
     }
 
@@ -542,6 +612,19 @@ private func addScene(name: String, location: String, time: String) {
         newSceneName = ""
         newSceneLocation = ""
         newSceneTime = ""
+    }
+
+    private func ensureBatchFlow() -> BatchStoryboardFlowStore? {
+        if let flow = batchFlow { return flow }
+        guard let project = selectedProject ?? highlightedProject else { return nil }
+        let flow = BatchStoryboardFlowStore(
+            project: project,
+            promptLibraryStore: promptLibraryStore,
+            actionCenter: actionCenter,
+            storyboardStore: storyboardStore
+        )
+        batchFlow = flow
+        return flow
     }
 }
 
@@ -664,53 +747,6 @@ private struct SceneNameSheet: View {
             location.trimmingCharacters(in: .whitespacesAndNewlines),
             time.trimmingCharacters(in: .whitespacesAndNewlines)
         )
-    }
-}
-
-private struct NewProjectSheet: View {
-    @Environment(\.dismiss) private var dismiss
-    @State private var title: String = ""
-    @State private var synopsis: String = ""
-    @State private var projectType: ScriptProject.ProjectType = .standalone
-    var onSave: (String, String, ScriptProject.ProjectType) -> Void
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 16) {
-            Text("新建项目")
-                .font(.title2.bold())
-            TextField("项目名称", text: $title)
-                .textFieldStyle(.roundedBorder)
-            Picker("项目类型", selection: $projectType) {
-                ForEach(ScriptProject.ProjectType.allCases) { type in
-                    Text(type.displayName).tag(type)
-                }
-            }
-            .pickerStyle(.segmented)
-            TextEditor(text: $synopsis)
-                .frame(minHeight: 160)
-                .overlay(
-                    RoundedRectangle(cornerRadius: 10)
-                        .stroke(Color.secondary.opacity(0.2))
-                )
-                .overlay(alignment: .topLeading) {
-                    if synopsis.isEmpty {
-                        Text("项目简介（可选）")
-                            .font(.caption)
-                            .padding(8)
-                            .foregroundStyle(.secondary)
-                    }
-                }
-            HStack {
-                Spacer()
-                Button("取消", role: .cancel) { dismiss() }
-                Button("创建") {
-                    onSave(title, synopsis, projectType)
-                    dismiss()
-                }
-                .disabled(title.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
-            }
-        }
-        .padding(24)
     }
 }
 

@@ -29,6 +29,18 @@ struct ScriptOverviewView: View {
         .onChange(of: highlightedProject?.id) { _, _ in
             syncDraftsFromHighlight()
         }
+        .onChange(of: highlightedProject?.updatedAt) { _, _ in
+            syncDraftsFromHighlight()
+        }
+        .onChange(of: draftProductionMembers) { _, _ in
+            persistProductionDrafts()
+        }
+        .onChange(of: draftProducerAssignments) { _, _ in
+            persistProductionDrafts()
+        }
+        .onChange(of: draftProductionTasks) { _, _ in
+            persistProductionDrafts()
+        }
     }
 
     private var gallerySection: some View {
@@ -36,9 +48,9 @@ struct ScriptOverviewView: View {
             header
             if projects.isEmpty {
                 ProjectSelectionPlaceholder(
-                    title: "暂无剧本项目",
-                    description: "点击下方按钮开始创建项目，或导入现有剧本。",
-                    buttonTitle: "新建项目",
+                    title: "请选择项目",
+                    description: "请先在“写作”模块创建或选择一个项目，然后回到剧本继续编写或导入剧本。",
+                    buttonTitle: "前往写作模块",
                     onCreate: onCreateProject
                 )
                 .frame(height: 220)
@@ -79,9 +91,9 @@ struct ScriptOverviewView: View {
             }
         } else {
             ProjectSelectionPlaceholder(
-                title: "暂无剧本项目",
-                description: "点击下方按钮开始创建项目，或导入现有剧本。",
-                buttonTitle: "新建项目",
+                title: "请选择项目",
+                description: "请在左侧列表或“写作”模块选择/创建项目后再进入剧本。",
+                buttonTitle: "前往写作模块",
                 onCreate: onCreateProject
             )
         }
@@ -105,6 +117,26 @@ private extension ScriptOverviewView {
         draftStartDate = project.productionStartDate
         draftEndDate = project.productionEndDate
         draftProductionTasks = project.productionTasks
+    }
+
+    func persistProductionDrafts() {
+        guard let project = highlightedProject else { return }
+        let storedAssignments = Dictionary(uniqueKeysWithValues: project.episodes.map { ($0.id, $0.producerID) })
+        let hasChanges = project.productionMembers != draftProductionMembers
+            || project.productionTasks != draftProductionTasks
+            || assignmentsEqual(storedAssignments, draftProducerAssignments) == false
+        // Skip writes when drafts already match the stored project to avoid redundant persists.
+        guard hasChanges else { return }
+        store.updateProductionMetadata(
+            projectID: project.id,
+            members: draftProductionMembers,
+            tasks: draftProductionTasks,
+            assignments: draftProducerAssignments
+        )
+    }
+
+    func assignmentsEqual(_ lhs: [UUID: UUID?], _ rhs: [UUID: UUID?]) -> Bool {
+        lhs.count == rhs.count && lhs.allSatisfy { rhs[$0.key] == $0.value }
     }
 }
 
@@ -321,7 +353,7 @@ struct ProjectInfoPanel: View {
     private var overviewDisplayContent: some View {
         VStack(alignment: .leading, spacing: 18) {
             VStack(alignment: .leading, spacing: 6) {
-                Text("项目简介")
+                Text("剧本简介")
                     .font(.headline)
                 Text(project.synopsis.isEmpty ? "暂无简介" : project.synopsis)
                     .foregroundStyle(.secondary)
@@ -357,7 +389,7 @@ struct ProjectInfoPanel: View {
     private var overviewEditingContent: some View {
         VStack(alignment: .leading, spacing: 18) {
             VStack(alignment: .leading, spacing: 6) {
-                Text("项目简介")
+                Text("剧本简介")
                     .font(.headline)
                 TextEditor(text: $draftSynopsis)
                     .frame(minHeight: 80, maxHeight: 140)
@@ -601,8 +633,8 @@ extension ProjectInfoPanel {
 
         var title: String {
             switch self {
-            case .overview: return "项目概览"
-            case .assets: return "角色与场景"
+            case .overview: return "剧本概览"
+            case .assets: return "剧本角色与场景"
             }
         }
 

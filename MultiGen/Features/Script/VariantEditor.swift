@@ -111,7 +111,7 @@ struct VariantEditor<Variant: VariantRepresentable>: View {
     private func setDefault(_ id: UUID) {
         // move selected variant to front
         if let idx = variants.firstIndex(where: { $0.id == id }) {
-            var variant = variants.remove(at: idx)
+            let variant = variants.remove(at: idx)
             variants.insert(variant, at: 0)
         }
     }

@@ -4,26 +4,12 @@ struct HomeDashboardView: View {
     let textModelLabel: String
     let textRouteLabel: String
 
-    private let workflowStages: [HomeWorkflowStage] = [
-        HomeWorkflowStage(
-            title: "剧本构思 · Script",
-            detail: "剧本模块负责剧集/分集创作、润色与结构化输出。",
-            focus: "应用深入介入",
-            isActive: true
-        ),
-        HomeWorkflowStage(
-            title: "分镜拆解 · Storyboard",
-            detail: "分镜模块将剧本转译为镜头表，智能协同可直接操作更新。",
-            focus: "应用深入介入",
-            isActive: true
-        )
-    ]
-
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 24) {
-                overviewSection
-                workflowSection
+                heroSection
+                statusRow
+                actionPlaceholder
             }
             .padding(24)
             .frame(maxWidth: .infinity, alignment: .leading)
@@ -31,98 +17,59 @@ struct HomeDashboardView: View {
         .background(Color(nsColor: .textBackgroundColor))
     }
 
-    private var overviewSection: some View {
+    private var heroSection: some View {
         VStack(alignment: .leading, spacing: 12) {
-            Text("MultiGen · macOS 专用 AIGC 创作台")
+            Text("总工作台 · 以项目为中心")
                 .font(.title.bold())
-            Text("当前聚焦剧本 → 分镜两段式流程，智能协同模块作为 AI 中枢负责统一路由、审计与回执。")
+            Text("""
+在写作、剧本、分镜、影像这些环节中精雕细琢，但更高一层需要跨环节的行动：同一项目的文本与影像相互转化（小说→剧本→脚本→提示词等），由 Agent 统筹。主页只关注“项目”这一容器，具体创作请进入对应模块。
+""")
                 .font(.callout)
                 .foregroundStyle(.secondary)
-
-            Grid(alignment: .leading, horizontalSpacing: 16, verticalSpacing: 12) {
-                GridRow {
-                    HomeMetricCard(title: "文本模型", value: textModelLabel)
-                    HomeMetricCard(title: "文本路线", value: textRouteLabel)
-                }
-            }
         }
     }
 
-    private var workflowSection: some View {
-        VStack(alignment: .leading, spacing: 16) {
-            Text("工作流程路线图")
-                .font(.title3.bold())
+    private var statusRow: some View {
+        HStack(spacing: 12) {
+            HomeMetricCard(title: "文本模型", value: textModelLabel)
+            HomeMetricCard(title: "文本路线", value: textRouteLabel)
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+    }
 
-            VStack(spacing: 0) {
-                ForEach(Array(workflowStages.enumerated()), id: \.element.id) { index, stage in
-                    workflowNode(for: stage)
-
-                    if index < workflowStages.count - 1 {
-                        HStack {
-                            VStack {
-                                Rectangle()
-                                    .fill(Color.secondary.opacity(0.4))
-                                    .frame(width: 2, height: 24)
-                                Image(systemName: "chevron.down")
-                                    .font(.caption2)
-                                    .foregroundStyle(.secondary)
-                                Rectangle()
-                                    .fill(Color.secondary.opacity(0.4))
-                                    .frame(width: 2, height: 24)
-                            }
-                            .frame(width: 28)
-                            Spacer()
-                        }
+    private var actionPlaceholder: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            Text("选择一个项目以开始")
+                .font(.headline)
+            Text("""
+在左侧列表或顶部“新建项目”创建容器。写作/剧本/分镜三形态平行存在：写作用于文学文本，剧本/分镜保持紧耦合。后续将在此编排跨模态动作。
+""")
+                .font(.callout)
+                .foregroundStyle(.secondary)
+            RoundedRectangle(cornerRadius: 16, style: .continuous)
+                .stroke(style: StrokeStyle(lineWidth: 1, dash: [8]))
+                .foregroundStyle(Color.secondary.opacity(0.35))
+                .frame(minHeight: 180)
+                .overlay(
+                    VStack(spacing: 10) {
+                        Image(systemName: "shippingbox.circle")
+                            .font(.system(size: 32))
+                            .foregroundStyle(.secondary)
+                        Text("项目容器")
+                            .font(.headline)
+                        Text("这是总工作台，只做容器选择/创建；具体创作请在写作/剧本/分镜模块进行。")
+                            .font(.footnote)
+                            .multilineTextAlignment(.center)
+                            .foregroundStyle(.secondary)
+                            .padding(.horizontal)
                     }
-                }
-            }
-            .padding(.top, 4)
+                    .padding()
+                )
         }
-    }
-
-    private func workflowNode(for stage: HomeWorkflowStage) -> some View {
-        HStack(alignment: .top, spacing: 12) {
-            Image(systemName: stage.isActive ? "checkmark.circle.fill" : "circle")
-                .font(.title3)
-                .foregroundStyle(stage.isActive ? Color.accentColor : Color.secondary.opacity(0.5))
-                .padding(.top, 2)
-
-            VStack(alignment: .leading, spacing: 4) {
-                HStack {
-                    Text(stage.title)
-                        .font(.headline)
-                    Spacer()
-                    Label(stage.focus, systemImage: "sparkles")
-                        .font(.caption)
-                        .padding(.horizontal, 8)
-                        .padding(.vertical, 4)
-                        .background(
-                            Capsule(style: .continuous)
-                                .fill(Color.accentColor.opacity(0.12))
-                        )
-                }
-                Text(stage.detail)
-                    .font(.subheadline)
-                    .foregroundStyle(.secondary)
-            }
-            .padding(16)
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .background(Color.clear)
-            .shadow(color: Color.black.opacity(0.12), radius: 10, y: 6)
-        }
-        .padding(.vertical, 6)
     }
 }
 
-private struct HomeWorkflowStage: Identifiable {
-    let id = UUID()
-    let title: String
-    let detail: String
-    let focus: String
-    let isActive: Bool
-}
-
-private struct HomeMetricCard: View {
+struct HomeMetricCard: View {
     let title: String
     let value: String
 

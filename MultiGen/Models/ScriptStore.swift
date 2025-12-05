@@ -340,6 +340,119 @@ struct EpisodeOutline: Identifiable, Codable, Hashable {
     }
 }
 
+struct WritingWork: Identifiable, Codable, Hashable {
+    enum WritingType: String, Codable, CaseIterable, Identifiable {
+        case standalone
+        case serialized
+
+        var id: String { rawValue }
+
+        var displayName: String {
+            switch self {
+            case .standalone: return "短篇/单篇"
+            case .serialized: return "分章/连载"
+            }
+        }
+    }
+
+    let id: UUID
+    var projectID: UUID
+    var title: String
+    var type: WritingType
+    var synopsis: String
+    var themeTags: [String]
+    var styleHints: String
+    var worldNotes: String
+    var authorNotes: String
+    var body: String
+    var chapters: [WritingChapter]
+
+    init(
+        id: UUID = UUID(),
+        projectID: UUID,
+        title: String,
+        type: WritingType,
+        synopsis: String = "",
+        themeTags: [String] = [],
+        styleHints: String = "",
+        worldNotes: String = "",
+        authorNotes: String = "",
+        body: String = "",
+        chapters: [WritingChapter] = []
+    ) {
+        self.id = id
+        self.projectID = projectID
+        self.title = title
+        self.type = type
+        self.synopsis = synopsis
+        self.themeTags = themeTags
+        self.styleHints = styleHints
+        self.worldNotes = worldNotes
+        self.authorNotes = authorNotes
+        self.body = body
+        self.chapters = chapters
+    }
+}
+
+struct WritingChapter: Identifiable, Codable, Hashable {
+    let id: UUID
+    var order: Int
+    var title: String
+    var summary: String
+    var body: String
+    var pov: String
+    var timeAndPlace: String
+    var charactersInvolved: [String]
+
+    init(
+        id: UUID = UUID(),
+        order: Int,
+        title: String,
+        summary: String = "",
+        body: String = "",
+        pov: String = "",
+        timeAndPlace: String = "",
+        charactersInvolved: [String] = []
+    ) {
+        self.id = id
+        self.order = order
+        self.title = title
+        self.summary = summary
+        self.body = body
+        self.pov = pov
+        self.timeAndPlace = timeAndPlace
+        self.charactersInvolved = charactersInvolved
+    }
+}
+
+struct ProjectContainer: Identifiable, Codable, Hashable {
+    let id: UUID
+    var title: String
+    var tags: [String]
+    var createdAt: Date
+    var updatedAt: Date
+    var writing: WritingWork?
+    var script: ScriptProject?
+
+    init(
+        id: UUID = UUID(),
+        title: String,
+        tags: [String] = [],
+        createdAt: Date = .now,
+        updatedAt: Date = .now,
+        writing: WritingWork? = nil,
+        script: ScriptProject? = nil
+    ) {
+        self.id = id
+        self.title = title
+        self.tags = tags
+        self.createdAt = createdAt
+        self.updatedAt = updatedAt
+        self.writing = writing
+        self.script = script
+    }
+}
+
 struct ScriptProject: Identifiable, Codable, Hashable {
     enum ProjectType: String, Codable, CaseIterable, Identifiable {
         case standalone
@@ -479,42 +592,106 @@ struct ProductionMember: Identifiable, Codable, Hashable {
 
 @MainActor
 final class ScriptStore: ObservableObject {
-    @Published private(set) var projects: [ScriptProject]
+    @Published private(set) var containers: [ProjectContainer]
     @Published private(set) var episodes: [ScriptEpisode] = []
     private let storageURL: URL
 
-    init() {
-        storageURL = ScriptStore.makeStorageURL()
-        projects = ScriptStore.load(from: storageURL)
-        projects = projects.map { project in
-            var copy = project
-            for idx in copy.episodes.indices {
-                normalizeScenes(in: &copy.episodes[idx])
+    /// Convenience: 已有脚本形态的项目列表，供现有 UI 兼容。
+    var projects: [ScriptProject] {
+        containers.compactMap { $0.script }
+    }
+
+    init(storageURL: URL? = nil) {
+        self.storageURL = storageURL ?? ScriptStore.makeStorageURL()
+        containers = ScriptStore.load(from: self.storageURL)
+        containers = containers.map { container in
+            var copy = container
+            if var script = copy.script {
+                for idx in script.episodes.indices {
+                    normalizeScenes(in: &script.episodes[idx])
+                }
+                normalizeAssets(in: &script)
+                copy.script = script
             }
-            normalizeAssets(in: &copy)
             return copy
         }
         rebuildEpisodesCache()
     }
 
+    // MARK: - Project Container / Writing / Script Forms
+
     func addProject(
         title: String,
         synopsis: String,
         type: ScriptProject.ProjectType,
+        writingTitle: String? = nil,
+        scriptTitle: String? = nil,
         mainCharacters: [ProjectCharacterProfile] = [],
         outlines: [EpisodeOutline] = [],
         addDefaultEpisode: Bool = true
-    ) -> ScriptProject {
-        var project = ScriptProject(
-            title: title.isEmpty ? "未命名项目" : title,
+    ) -> ProjectContainer {
+        let projectID = UUID()
+        let writingType: WritingWork.WritingType = (type == .episodic) ? .serialized : .standalone
+        let writing = WritingWork(
+            projectID: projectID,
+            title: writingTitle?.isEmpty == false ? writingTitle! : title,
+            type: writingType,
             synopsis: synopsis,
+            chapters: [
+                WritingChapter(
+                    order: 1,
+                    title: writingType == .serialized ? "第1章" : "草稿",
+                    summary: "",
+                    body: ""
+                )
+            ]
+        )
+        var container = ProjectContainer(
+            id: projectID,
+            title: title.isEmpty ? "未命名项目" : title,
+            tags: [],
+            createdAt: .now,
+            updatedAt: .now,
+            writing: writing,
+            script: nil
+        )
+        containers.append(container)
+        _ = attachScriptForm(
+            to: projectID,
+            type: type,
+            mainCharacters: [],
+            outlines: outlines,
+            addDefaultEpisode: addDefaultEpisode
+        )
+        if let idx = containerIndex(for: projectID) {
+            containers[idx].script?.title = scriptTitle?.isEmpty == false ? scriptTitle! : containers[idx].title
+            containers[idx].updatedAt = .now
+            persist()
+            rebuildEpisodesCache()
+        }
+        return containers.last!
+    }
+
+    func attachScriptForm(
+        to projectID: UUID,
+        type: ScriptProject.ProjectType,
+        mainCharacters: [ProjectCharacterProfile] = [],
+        outlines: [EpisodeOutline] = [],
+        addDefaultEpisode: Bool = true
+    ) -> ScriptProject? {
+        guard let index = containerIndex(for: projectID) else { return nil }
+        if containers[index].script != nil { return containers[index].script }
+        var script = ScriptProject(
+            id: projectID,
+            title: containers[index].title,
+            synopsis: containers[index].writing?.synopsis ?? "",
             tags: [],
             type: type,
             mainCharacters: mainCharacters,
             episodeOutlines: outlines
         )
-        if addDefaultEpisode, project.episodes.isEmpty {
-            project.episodes = [
+        if addDefaultEpisode {
+            script.episodes = [
                 ScriptEpisode(
                     episodeNumber: 1,
                     title: type == .standalone ? "整片" : "第1集",
@@ -522,39 +699,146 @@ final class ScriptStore: ObservableObject {
                 )
             ]
         }
-        projects.append(project)
+        containers[index].script = script
+        containers[index].updatedAt = .now
         persist()
         rebuildEpisodesCache()
-        return project
+        return script
     }
 
     func removeProject(id: UUID) {
-        projects.removeAll { $0.id == id }
+        containers.removeAll { $0.id == id }
         persist()
         rebuildEpisodesCache()
     }
 
     func updateProject(id: UUID, update: (inout ScriptProject) -> Void) {
-        guard let index = projects.firstIndex(where: { $0.id == id }) else { return }
-        update(&projects[index])
-        normalizeAssets(in: &projects[index])
-        projects[index].updatedAt = .now
+        guard let index = containerIndex(for: id) else { return }
+        guard containers[index].script != nil else { return }
+        update(&containers[index].script!)
+        normalizeAssets(in: &containers[index].script!)
+        containers[index].script!.updatedAt = .now
+        containers[index].updatedAt = .now
         persist()
         rebuildEpisodesCache()
     }
 
+    func updateProductionMetadata(
+        projectID: UUID,
+        members: [ProductionMember],
+        tasks: [ProductionTask],
+        assignments: [UUID: UUID?]
+    ) {
+        updateProject(id: projectID) { editable in
+            editable.productionMembers = members
+            editable.productionTasks = tasks
+            editable.episodes = editable.episodes.map { episode in
+                var updated = episode
+                if let override = assignments[episode.id] {
+                    updated.producerID = override
+                }
+                return updated
+            }
+        }
+    }
+
     func reorderCharacters(projectID: UUID, source: IndexSet, destination: Int) {
-        guard let index = projects.firstIndex(where: { $0.id == projectID }) else { return }
-        projects[index].mainCharacters.move(fromOffsets: source, toOffset: destination)
-        projects[index].updatedAt = .now
+        guard let index = containerIndex(for: projectID), containers[index].script != nil else { return }
+        containers[index].script!.mainCharacters.move(fromOffsets: source, toOffset: destination)
+        containers[index].script!.updatedAt = .now
+        containers[index].updatedAt = .now
         persist()
     }
 
     func reorderScenes(projectID: UUID, source: IndexSet, destination: Int) {
-        guard let index = projects.firstIndex(where: { $0.id == projectID }) else { return }
-        projects[index].keyScenes.move(fromOffsets: source, toOffset: destination)
-        projects[index].updatedAt = .now
+        guard let index = containerIndex(for: projectID), containers[index].script != nil else { return }
+        containers[index].script!.keyScenes.move(fromOffsets: source, toOffset: destination)
+        containers[index].script!.updatedAt = .now
+        containers[index].updatedAt = .now
         persist()
+    }
+
+    func ensureWriting(projectID: UUID, type: WritingWork.WritingType = .standalone) -> WritingWork? {
+        guard let idx = containerIndex(for: projectID) else { return nil }
+        if let writing = containers[idx].writing { return writing }
+        let writing = WritingWork(
+            projectID: projectID,
+            title: containers[idx].title,
+            type: type,
+            chapters: [WritingChapter(order: 1, title: type == .serialized ? "第1章" : "草稿")]
+        )
+        containers[idx].writing = writing
+        containers[idx].updatedAt = .now
+        persist()
+        return writing
+    }
+
+    func updateWriting(projectID: UUID, update: (inout WritingWork) -> Void) {
+        guard let idx = containerIndex(for: projectID) else { return }
+        var writing = containers[idx].writing ?? WritingWork(projectID: projectID, title: containers[idx].title, type: .standalone, chapters: [WritingChapter(order: 1, title: "草稿")])
+        update(&writing)
+        writing.projectID = projectID
+        containers[idx].writing = writing
+        containers[idx].updatedAt = .now
+        persist()
+    }
+    func replaceScript(projectID: UUID, with payload: ScriptImportPayload) {
+        let scriptType: ScriptProject.ProjectType = payload.episodes.count > 1 ? .episodic : .standalone
+        guard let script = ensureScript(projectID: projectID, type: scriptType) else { return }
+        updateProject(id: projectID) { editable in
+            editable.title = editable.title.isEmpty ? "未命名剧本" : editable.title
+            editable.synopsis = payload.synopsis
+            editable.notes = payload.synopsis
+            editable.mainCharacters = payload.characters
+            editable.keyScenes = payload.episodes.flatMap { $0.scenes }.map {
+                ProjectSceneProfile(
+                    id: UUID(),
+                    name: $0.title,
+                    description: $0.body
+                )
+            }
+            editable.episodeOutlines = payload.outlines
+            editable.type = scriptType
+            editable.productionStartDate = editable.productionStartDate ?? Date()
+            editable.productionTasks = []
+            editable.episodes = []
+        }
+        for item in payload.episodes {
+            let episodeMarkdown: String
+            if item.scenes.isEmpty {
+                episodeMarkdown = item.body
+            } else {
+                episodeMarkdown = item.scenes.map { $0.body }.joined(separator: "\n\n")
+            }
+            if let episode = addEpisode(to: projectID, number: item.episodeNumber, title: item.title, markdown: episodeMarkdown) {
+                let scenes: [ScriptScene]
+                if item.scenes.isEmpty {
+                    scenes = [
+                        ScriptScene(
+                            order: 1,
+                            title: "未命名场景",
+                            summary: "",
+                            body: item.body
+                        )
+                    ]
+                } else {
+                    scenes = item.scenes.map { scene in
+                        ScriptScene(
+                            order: scene.index,
+                            title: scene.title,
+                            summary: "",
+                            body: scene.body,
+                            locationHint: scene.locationHint,
+                            timeHint: scene.timeHint
+                        )
+                    }
+                }
+                updateEpisode(projectID: projectID, episodeID: episode.id) { editable in
+                    editable.scenes = scenes
+                }
+            }
+        }
+        rebuildEpisodesCache()
     }
 
     func addEpisode(
@@ -563,8 +847,9 @@ final class ScriptStore: ObservableObject {
         title: String,
         markdown: String
     ) -> ScriptEpisode? {
-        guard let index = projects.firstIndex(where: { $0.id == projectID }) else { return nil }
-        let project = projects[index]
+        guard let index = containerIndex(for: projectID) else { return nil }
+        guard containers[index].script != nil else { return nil }
+        let project = containers[index].script!
         let nextNumber = number ?? ((project.episodes.map(\.episodeNumber).max() ?? 0) + 1)
         var episode = ScriptEpisode(
             episodeNumber: max(nextNumber, 1),
@@ -573,17 +858,19 @@ final class ScriptStore: ObservableObject {
         )
         episode.synopsis = makeSynopsis(from: markdown)
         normalizeScenes(in: &episode)
-        projects[index].episodes.append(episode)
-        projects[index].updatedAt = .now
+        containers[index].script!.episodes.append(episode)
+        containers[index].script!.updatedAt = .now
+        containers[index].updatedAt = .now
         persist()
         rebuildEpisodesCache()
         return episode
     }
 
     func removeEpisode(projectID: UUID, episodeID: UUID) {
-        guard let index = projects.firstIndex(where: { $0.id == projectID }) else { return }
-        projects[index].episodes.removeAll { $0.id == episodeID }
-        projects[index].updatedAt = .now
+        guard let index = containerIndex(for: projectID), containers[index].script != nil else { return }
+        containers[index].script!.episodes.removeAll { $0.id == episodeID }
+        containers[index].script!.updatedAt = .now
+        containers[index].updatedAt = .now
         persist()
         rebuildEpisodesCache()
     }
@@ -593,19 +880,27 @@ final class ScriptStore: ObservableObject {
         episodeID: UUID,
         update: (inout ScriptEpisode) -> Void
     ) {
-        guard let projectIndex = projects.firstIndex(where: { $0.id == projectID }) else { return }
-        guard let episodeIndex = projects[projectIndex].episodes.firstIndex(where: { $0.id == episodeID }) else { return }
-        update(&projects[projectIndex].episodes[episodeIndex])
-        normalizeScenes(in: &projects[projectIndex].episodes[episodeIndex])
-        projects[projectIndex].episodes[episodeIndex].updatedAt = .now
-        projects[projectIndex].updatedAt = .now
+        guard let projectIndex = containerIndex(for: projectID), containers[projectIndex].script != nil else { return }
+        guard let episodeIndex = containers[projectIndex].script!.episodes.firstIndex(where: { $0.id == episodeID }) else { return }
+        update(&containers[projectIndex].script!.episodes[episodeIndex])
+        normalizeScenes(in: &containers[projectIndex].script!.episodes[episodeIndex])
+        containers[projectIndex].script!.episodes[episodeIndex].updatedAt = .now
+        containers[projectIndex].script!.updatedAt = .now
+        containers[projectIndex].updatedAt = .now
         persist()
         rebuildEpisodesCache()
     }
 
     func project(id: UUID?) -> ScriptProject? {
         guard let id else { return nil }
-        return projects.first(where: { $0.id == id })
+        return containers.first(where: { $0.id == id })?.script
+    }
+
+    func ensureScript(projectID: UUID, type: ScriptProject.ProjectType = .standalone) -> ScriptProject? {
+        if let existing = project(id: projectID) {
+            return existing
+        }
+        return attachScriptForm(to: projectID, type: type)
     }
 
     func episode(projectID: UUID?, episodeID: UUID?) -> ScriptEpisode? {
@@ -685,24 +980,28 @@ final class ScriptStore: ObservableObject {
     }
 
     private func rebuildEpisodesCache() {
-        episodes = projects.flatMap(\.episodes)
+        episodes = containers.compactMap { $0.script?.episodes }.flatMap { $0 }
+    }
+
+    private func containerIndex(for id: UUID) -> Int? {
+        containers.firstIndex { $0.id == id }
     }
 
     private func persist() {
         do {
             try FileManager.default.createDirectory(at: storageURL.deletingLastPathComponent(), withIntermediateDirectories: true)
-            let data = try JSONEncoder().encode(projects)
+            let data = try JSONEncoder().encode(containers)
             try data.write(to: storageURL, options: .atomic)
         } catch {
             print("ScriptStore persist error: \(error)")
         }
     }
 
-    private static func load(from url: URL) -> [ScriptProject] {
+    private static func load(from url: URL) -> [ProjectContainer] {
         guard let data = try? Data(contentsOf: url) else {
-            return ScriptProject.sampleData
+            return []
         }
-        return (try? JSONDecoder().decode([ScriptProject].self, from: data)) ?? ScriptProject.sampleData
+        return (try? JSONDecoder().decode([ProjectContainer].self, from: data)) ?? []
     }
 
     private static func makeStorageURL() -> URL {

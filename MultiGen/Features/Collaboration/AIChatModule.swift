@@ -13,6 +13,8 @@ enum AIChatModule: String, Equatable, CaseIterable {
             return .script
         case .storyboard:
             return .storyboard
+        case .writing:
+            return .general
         case .libraryStyles, .libraryCharacters, .libraryScenes, .libraryPrompts:
             return selection == .libraryStyles ? .promptHelperStyle : .promptHelper
         default:
@@ -21,8 +23,6 @@ enum AIChatModule: String, Equatable, CaseIterable {
                 return .script
             case .storyboard:
                 return .storyboard
-            case .general:
-                return .general
             default:
                 return .promptHelper
             }

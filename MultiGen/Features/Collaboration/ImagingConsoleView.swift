@@ -3,6 +3,7 @@ import AppKit
 import UniformTypeIdentifiers
 
 struct ImagingConsoleView: View {
+    @EnvironmentObject private var configuration: AppConfiguration
     @EnvironmentObject private var actionCenter: AIActionCenter
     @EnvironmentObject private var promptLibraryStore: PromptLibraryStore
 
@@ -13,6 +14,10 @@ struct ImagingConsoleView: View {
     @State private var isSending = false
     @State private var errorMessage: String?
     @State private var previewImage: NSImage?
+    @State private var lastRequestPrompt: String = ""
+    @State private var lastRequestModelLabel: String = ""
+    @State private var lastRequestTimestamp: Date?
+    @State private var lastSentImageData: Data?
 
     // 规格控制
     @State private var imageCount: Int = 1
@@ -46,13 +51,7 @@ struct ImagingConsoleView: View {
         .padding(12)
         .sheet(isPresented: Binding(get: { previewImage != nil }, set: { if $0 == false { previewImage = nil } })) {
             if let image = previewImage {
-                ScrollView([.vertical, .horizontal]) {
-                    Image(nsImage: image)
-                        .resizable()
-                        .scaledToFit()
-                        .padding()
-                }
-                .frame(minWidth: 520, minHeight: 420)
+                ImagePreviewSheet(image: image) { previewImage = nil }
             }
         }
     }
@@ -65,6 +64,7 @@ struct ImagingConsoleView: View {
                 .font(.headline)
 
             uploadArea
+            statusCard
 
             if let errorMessage {
                 Text(errorMessage)
@@ -76,6 +76,7 @@ struct ImagingConsoleView: View {
             specControls
             Divider()
             angleControls
+            requestSummaryCard
         }
     }
 
@@ -174,6 +175,75 @@ struct ImagingConsoleView: View {
         }
     }
 
+    private var statusCard: some View {
+        let currentPrompt = makeFinalPrompt(userText: inputText.trimmingCharacters(in: .whitespacesAndNewlines))
+        let ready = missingSetupReason == nil && selectedImageData != nil
+        return VStack(alignment: .leading, spacing: 6) {
+            HStack {
+                Label(ready ? "准备就绪" : "待完善", systemImage: ready ? "checkmark.shield" : "exclamationmark.triangle")
+                    .foregroundStyle(ready ? .green : .orange)
+                Spacer()
+                if isSending {
+                    ProgressView().controlSize(.small)
+                }
+            }
+            if let missing = missingSetupReason {
+                Text(missing).font(.caption).foregroundStyle(.secondary)
+            } else if selectedImageData == nil {
+                Text("请上传参考图后再发送。").font(.caption).foregroundStyle(.secondary)
+            } else {
+                Text("模型：\(configuration.relaySelectedTextModel ?? "未配置") · 即将发送多模态请求")
+                    .font(.caption).foregroundStyle(.secondary)
+            }
+            if ready && currentPrompt.isEmpty == false {
+                Text("请求摘要：\(currentPrompt)")
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+                    .lineLimit(3)
+            }
+        }
+        .padding(10)
+        .background(
+            RoundedRectangle(cornerRadius: 10, style: .continuous)
+                .fill(Color(nsColor: .underPageBackgroundColor))
+        )
+    }
+
+    private var requestSummaryCard: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            HStack {
+                Text("请求追踪")
+                    .font(.subheadline.bold())
+                Spacer()
+                if let ts = lastRequestTimestamp {
+                    Text(ts.formatted(date: .abbreviated, time: .shortened))
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
+                }
+            }
+            if lastRequestPrompt.isEmpty {
+                Text("尚未发送请求，上传参考图并填写提示词后点击发送。")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            } else {
+                VStack(alignment: .leading, spacing: 4) {
+                    Text("模型：\(lastRequestModelLabel)")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                    Text(lastRequestPrompt)
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
+                        .lineLimit(5)
+                }
+            }
+        }
+        .padding(10)
+        .background(
+            RoundedRectangle(cornerRadius: 10, style: .continuous)
+                .fill(Color(nsColor: .underPageBackgroundColor))
+        )
+    }
+
     private var inputBar: some View {
         VStack(alignment: .leading, spacing: 6) {
             Text("提示词（描述需要保留或微调的点，默认保持原图其它细节不变）")
@@ -183,11 +253,11 @@ struct ImagingConsoleView: View {
                 TextEditor(text: $inputText)
                     .frame(minHeight: 60, maxHeight: 120)
                     .padding(6)
-                    .background(RoundedRectangle(cornerRadius: 10, style: .continuous).stroke(Color.secondary.opacity(0.2)))
-                    .onSubmit { send() }
-                    .submitLabel(.send)
-                Button(action: send) {
-                    if isSending {
+                .background(RoundedRectangle(cornerRadius: 10, style: .continuous).stroke(Color.secondary.opacity(0.2)))
+                .onSubmit { send() }
+                .submitLabel(.send)
+            Button(action: send) {
+                if isSending {
                         ProgressView()
                     } else {
                         Image(systemName: "arrow.up.circle.fill")
@@ -195,7 +265,7 @@ struct ImagingConsoleView: View {
                     }
                 }
                 .buttonStyle(.borderedProminent)
-                .disabled(isSending)
+                .disabled(isSending || canSend == false)
             }
         }
     }
@@ -215,6 +285,10 @@ struct ImagingConsoleView: View {
     private func send() {
         let trimmed = inputText.trimmingCharacters(in: .whitespacesAndNewlines)
         guard isSending == false else { return }
+        if let missing = missingSetupReason {
+            errorMessage = missing
+            return
+        }
         guard let imageData = selectedImageData else {
             errorMessage = "请先上传参考图"
             return
@@ -223,17 +297,19 @@ struct ImagingConsoleView: View {
         let mime = "image/jpeg"
         let dataURI = "data:\(mime);base64,\(base64)"
         let systemPrompt = promptLibraryStore.document(for: .imagingAssistant).content.trimmingCharacters(in: .whitespacesAndNewlines)
+        let finalPrompt = makeFinalPrompt(userText: trimmed)
 
-        let controlPrompt = buildControlPrompt()
-        let finalPrompt = [controlPrompt, trimmed].filter { $0.isEmpty == false }.joined(separator: "\n")
-
-        var fields: [String: String] = [
-            "prompt": finalPrompt,
-            "image_base64": base64,
-            "imageBase64": base64,
-            "image_url": dataURI,
-            "image_mime": mime
-        ]
+        var fields = AIChatRequestBuilder.makeFields(
+            prompt: finalPrompt,
+            context: .general,
+            module: .imagingAssistant,
+            systemPrompt: systemPrompt.isEmpty ? nil : systemPrompt
+        )
+        // 附件与 OpenAI 样式内容，复用主页多模态字段
+        fields["image_base64"] = base64
+        fields["imageBase64"] = base64
+        fields["image_url"] = dataURI
+        fields["image_mime"] = mime
         let contentPayload: [[String: Any]] = [
             ["type": "text", "text": finalPrompt],
             ["type": "image_url", "image_url": ["url": dataURI]]
@@ -242,9 +318,6 @@ struct ImagingConsoleView: View {
            let text = String(data: data, encoding: .utf8) {
             fields["openai_content"] = text
         }
-        if systemPrompt.isEmpty == false {
-            fields["systemPrompt"] = systemPrompt
-        }
 
         let request = AIActionRequest(
             kind: .conversation,
@@ -252,13 +325,17 @@ struct ImagingConsoleView: View {
             channel: .text,
             fields: fields,
             assetReferences: [],
-            module: nil,
+            module: .imagingAssistant,
             context: .general,
             contextSummaryOverride: "影像模块",
             origin: "影像模块"
         )
 
         messages.append(AIChatMessage(role: .user, text: finalPrompt, images: imageData.toNSImageList()))
+        lastRequestPrompt = finalPrompt
+        lastRequestModelLabel = configuration.relaySelectedTextModel ?? "未配置模型"
+        lastRequestTimestamp = Date()
+        lastSentImageData = imageData
         isSending = true
         errorMessage = nil
         inputText = ""
@@ -270,21 +347,37 @@ struct ImagingConsoleView: View {
                 await MainActor.run {
                     let detail = "Model: \(result.metadata.model)"
                     var images: [NSImage] = []
+                    var generatedData: Data?
+
                     if let image = result.image {
                         images.append(image)
+                        generatedData = image.tiffRepresentation
                     } else if let b64 = result.imageBase64,
                               let data = Data(base64Encoded: b64, options: .ignoreUnknownCharacters),
                               let img = NSImage(data: data) {
                         images.append(img)
+                        generatedData = data
                     } else if let url = result.imageURL,
                               let data = try? Data(contentsOf: url),
                               let img = NSImage(data: data) {
                         images.append(img)
+                        generatedData = data
                     }
+
+                    let baseText = sanitizeDisplayText(result.text ?? "")
+                    var notes: [String] = []
+                    if let generatedData, let original = lastSentImageData, generatedData == original {
+                        notes.append("模型可能回显了参考图，未检测到改动。")
+                    }
+                    if images.isEmpty && baseText.isEmpty {
+                        notes.append("模型未返回图片或文本，请检查提示词或模型支持情况。")
+                    }
+                    let combinedText = ([baseText] + notes).filter { $0.isEmpty == false }.joined(separator: "\n")
+
                     messages.append(
                         AIChatMessage(
                             role: .assistant,
-                            text: result.text ?? "",
+                            text: combinedText.isEmpty ? "（无文本返回）" : combinedText,
                             detail: detail,
                             images: images
                         )
@@ -297,6 +390,25 @@ struct ImagingConsoleView: View {
                 }
             }
         }
+    }
+
+    private func makeFinalPrompt(userText: String) -> String {
+        let controlPrompt = buildControlPrompt()
+        return [controlPrompt, userText].filter { $0.isEmpty == false }.joined(separator: "\n")
+    }
+
+    private var canSend: Bool {
+        missingSetupReason == nil && selectedImageData != nil
+    }
+
+    private var missingSetupReason: String? {
+        if configuration.relayAPIKey.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            return "未配置中转 API Key，请先在设置中填写。"
+        }
+        if (configuration.relaySelectedTextModel ?? "").trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            return "未选择文本模型，请先在设置中选择。"
+        }
+        return nil
     }
 
     private func buildControlPrompt() -> String {
@@ -418,4 +530,20 @@ private func compressedImageData(from image: NSImage, maxDimension: CGFloat = 51
     guard let tiff = newImage.tiffRepresentation,
           let rep = NSBitmapImageRep(data: tiff) else { return image.tiffRepresentation }
     return rep.representation(using: .jpeg, properties: [.compressionFactor: quality])
+}
+
+private func sanitizeDisplayText(_ text: String) -> String {
+    // 去除 data URI/base64 等不可视巨大内容，保留可读文字/URL
+    let pattern = #"data:image\/[a-zA-Z0-9.+-]+;base64,[A-Za-z0-9+/=]+"#
+    let regex = try? NSRegularExpression(pattern: pattern, options: [])
+    let range = NSRange(location: 0, length: (text as NSString).length)
+    let stripped = regex?.stringByReplacingMatches(in: text, options: [], range: range, withTemplate: "[图片数据已省略]") ?? text
+    let trimmed = stripped.trimmingCharacters(in: .whitespacesAndNewlines)
+    // 避免超长文本影响布局
+    let limit = 2000
+    if trimmed.count > limit {
+        let prefix = trimmed.prefix(limit)
+        return "\(prefix)…（已截断）"
+    }
+    return trimmed
 }

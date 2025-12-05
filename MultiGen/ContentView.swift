@@ -18,7 +18,13 @@ struct ContentView: View {
     @EnvironmentObject private var promptLibraryStore: PromptLibraryStore
     @EnvironmentObject private var styleLibraryStore: StyleLibraryStore
     @EnvironmentObject private var navigationStore: NavigationStore
+    @State private var showingNewProjectSheet = false
+    @State private var projectName: String = ""
+    @State private var writingTitle: String = ""
+    @State private var scriptTitle: String = ""
+    @State private var scriptType: ScriptProject.ProjectType = .standalone
 
+    
     var body: some View {
         NavigationSplitView(columnVisibility: $navigationStore.columnVisibility) {
             VStack(spacing: 12) {
@@ -77,6 +83,26 @@ struct ContentView: View {
                             .help("查看 AIGC 场景创作现状与解决策略")
                         }
                         ToolbarItem(placement: .primaryAction) {
+                            Button {
+                                showingNewProjectSheet = true
+                            } label: {
+                                Label("新建项目", systemImage: "plus")
+                            }
+                            .help("创建项目容器（写作+剧本&分镜）")
+                        }
+                        ToolbarItem(placement: .destructiveAction) {
+                            if let projectID = navigationStore.currentScriptProjectID {
+                                Button(role: .destructive) {
+                                    scriptStore.removeProject(id: projectID)
+                                    navigationStore.currentScriptProjectID = scriptStore.containers.first?.id
+                                    navigationStore.currentScriptEpisodeID = nil
+                                } label: {
+                                    Label("删除项目", systemImage: "trash")
+                                }
+                                .help("删除当前选中的项目容器")
+                            }
+                        }
+                        ToolbarItem(placement: .primaryAction) {
                             SettingsLink {
                                 Label("设置", systemImage: "slider.horizontal.3")
                             }
@@ -88,6 +114,20 @@ struct ContentView: View {
                     PainPointSheetView(painPoints: PainPointCatalog.corePainPoints)
                         .frame(minWidth: 520, minHeight: 420)
                 }
+                .sheet(isPresented: $showingNewProjectSheet) {
+                    HomeNewProjectSheet(
+                        projectName: $projectName,
+                        writingTitle: $writingTitle,
+                        scriptTitle: $scriptTitle,
+                        scriptType: $scriptType,
+                        onCreate: createProjectFromHome,
+                        onCancel: {
+                            resetProjectForm()
+                            showingNewProjectSheet = false
+                        }
+                    )
+                    .frame(minWidth: 520, minHeight: 420)
+                }
         }
         .toolbarBackground(.visible, for: .automatic)
         .task { }
@@ -98,11 +138,16 @@ struct ContentView: View {
     private func detailView(for item: SidebarItem) -> some View {
         switch item {
         case .home:
-            HomeDashboardView(
+            HomeWorkspaceView(
                 textModelLabel: dependencies.currentTextModelLabel(),
                 textRouteLabel: dependencies.currentTextRoute().displayName
             )
+            .environmentObject(scriptStore)
+            .environmentObject(navigationStore)
             .navigationTitle("MultiGen 控制台")
+        case .writing:
+            WritingView()
+                .navigationTitle("写作")
         case .script:
             ScriptView()
                 .navigationTitle("剧本")
@@ -157,8 +202,94 @@ struct ContentView: View {
 
 }
 
+private extension ContentView {
+    func createProjectFromHome() {
+        let projectTitle = projectName.trimmingCharacters(in: .whitespacesAndNewlines)
+        let finalProjectTitle = projectTitle.isEmpty ? "未命名项目" : projectTitle
+        let finalWritingTitle = writingTitle.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? finalProjectTitle : writingTitle.trimmingCharacters(in: .whitespacesAndNewlines)
+        let finalScriptTitle = scriptTitle.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? finalProjectTitle : scriptTitle.trimmingCharacters(in: .whitespacesAndNewlines)
+
+        let container = scriptStore.addProject(
+            title: finalProjectTitle,
+            synopsis: "",
+            type: scriptType,
+            writingTitle: finalWritingTitle,
+            scriptTitle: finalScriptTitle,
+            addDefaultEpisode: true
+        )
+        navigationStore.currentScriptProjectID = container.id
+        navigationStore.currentScriptEpisodeID = scriptStore.project(id: container.id)?.orderedEpisodes.first?.id
+        navigationStore.selection = .home
+        resetProjectForm()
+        showingNewProjectSheet = false
+    }
+
+    func resetProjectForm() {
+        projectName = ""
+        writingTitle = ""
+        scriptTitle = ""
+        scriptType = .standalone
+    }
+
+}
+
+
+struct HomeNewProjectSheet: View {
+    @Binding var projectName: String
+    @Binding var writingTitle: String
+    @Binding var scriptTitle: String
+    @Binding var scriptType: ScriptProject.ProjectType
+        var onCreate: () -> Void
+    var onCancel: () -> Void
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 14) {
+            Text("新建项目容器")
+                .font(.title2.bold())
+            TextField("项目名称", text: $projectName)
+                .textFieldStyle(.roundedBorder)
+
+            VStack(alignment: .leading, spacing: 8) {
+                Text("写作文本")
+                    .font(.headline)
+                TextField("写作文本标题（默认同项目名）", text: $writingTitle)
+                    .textFieldStyle(.roundedBorder)
+            }
+
+            VStack(alignment: .leading, spacing: 8) {
+                Text("剧本 & 分镜")
+                    .font(.headline)
+                TextField("剧本名称（默认同项目名或导入文件名）", text: $scriptTitle)
+                    .textFieldStyle(.roundedBorder)
+                Picker("剧本类型", selection: $scriptType) {
+                    ForEach(ScriptProject.ProjectType.allCases) { type in
+                        Text(type.displayName).tag(type)
+                    }
+                }
+                .pickerStyle(.segmented)
+
+                            }
+
+            Spacer()
+            HStack {
+                Spacer()
+                Button("取消", role: .cancel) {
+                    onCancel()
+                }
+                Button("创建") {
+                    onCreate()
+                }
+                .disabled(projectName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty && scriptTitle.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty && writingTitle.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+                .buttonStyle(.borderedProminent)
+            }
+        }
+        .padding(24)
+    }
+}
+
 enum SidebarItem: String, Identifiable {
     case home
+    case writing
     case script
     case storyboard
     case imaging
@@ -167,7 +298,7 @@ enum SidebarItem: String, Identifiable {
     case libraryScenes
     case libraryPrompts
 
-    static let primaryItems: [SidebarItem] = [.home, .script, .storyboard, .imaging]
+    static let primaryItems: [SidebarItem] = [.home, .writing, .script, .storyboard, .imaging]
     static let libraryItems: [SidebarItem] = [.libraryStyles, .libraryCharacters, .libraryScenes, .libraryPrompts]
 
     var id: String { rawValue }
@@ -175,6 +306,7 @@ enum SidebarItem: String, Identifiable {
     var title: String {
         switch self {
         case .home: return "主页"
+        case .writing: return "写作"
         case .script: return "剧本"
         case .storyboard: return "分镜"
         case .imaging: return "影像"
@@ -188,6 +320,7 @@ enum SidebarItem: String, Identifiable {
     var icon: String {
         switch self {
         case .home: return "house"
+        case .writing: return "pencil.and.outline"
         case .script: return "book.pages"
         case .storyboard: return "rectangle.3.offgrid"
         case .imaging: return "photo.stack"

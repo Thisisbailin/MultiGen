@@ -319,7 +319,10 @@ final class StoryboardDialogueStore: ObservableObject {
     }
 
     private func observeStores() {
-        scriptStore.$projects
+        scriptStore.$containers
+            .map { containers in
+                containers.compactMap { $0.script }
+            }
             .receive(on: RunLoop.main)
             .sink { [weak self] projects in
                 self?.handleProjectListUpdate(projects)
