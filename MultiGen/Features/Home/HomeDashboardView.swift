@@ -3,17 +3,18 @@ import SwiftUI
 struct HomeDashboardView: View {
     let textModelLabel: String
     let textRouteLabel: String
+    let showEmptyGuide: Bool
 
     var body: some View {
-        ScrollView {
-            VStack(alignment: .leading, spacing: 24) {
-                heroSection
-                statusRow
+        VStack(alignment: .leading, spacing: 24) {
+            heroSection
+            statusRow
+            if showEmptyGuide {
                 actionPlaceholder
             }
-            .padding(24)
-            .frame(maxWidth: .infinity, alignment: .leading)
         }
+        .padding(24)
+        .frame(maxWidth: .infinity, alignment: .leading)
         .background(Color(nsColor: .textBackgroundColor))
     }
 
@@ -52,12 +53,12 @@ struct HomeDashboardView: View {
                 .frame(minHeight: 180)
                 .overlay(
                     VStack(spacing: 10) {
-                        Image(systemName: "shippingbox.circle")
+                        Image(systemName: "plus.circle")
                             .font(.system(size: 32))
                             .foregroundStyle(.secondary)
                         Text("项目容器")
                             .font(.headline)
-                        Text("这是总工作台，只做容器选择/创建；具体创作请在写作/剧本/分镜模块进行。")
+                        Text("当前暂无项目，请点击右上角“新建项目”或在侧边栏添加；创建后再去写作/剧本/分镜模块继续创作。")
                             .font(.footnote)
                             .multilineTextAlignment(.center)
                             .foregroundStyle(.secondary)

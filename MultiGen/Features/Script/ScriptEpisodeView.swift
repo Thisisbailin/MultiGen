@@ -7,49 +7,47 @@ struct ScriptEpisodeView: View {
     let selectedEpisode: ScriptEpisode?
 
     var body: some View {
-        ScrollView {
-            VStack(alignment: .leading, spacing: 16) {
-                if let episode = selectedEpisode {
-                    VStack(alignment: .leading, spacing: 16) {
-                        VStack(alignment: .leading, spacing: 6) {
-                            Text(episode.displayLabel)
-                                .font(.system(.title, weight: .semibold))
-                            Text("更新 \(episode.updatedAt.formatted(date: .abbreviated, time: .shortened))")
-                                .foregroundStyle(.secondary)
-                        }
-                        SceneEditorList(
-                            scenes: episode.scenes.sorted { $0.order < $1.order },
-                            onTitleChange: { sceneID, value in
-                                store.updateSceneTitle(projectID: project.id, episodeID: episode.id, sceneID: sceneID, title: value)
-                            },
-                            onBodyChange: { sceneID, value in
-                                store.updateSceneBody(projectID: project.id, episodeID: episode.id, sceneID: sceneID, body: value)
-                            },
-                            onLocationChange: { sceneID, value in
-                                store.updateSceneLocationHint(projectID: project.id, episodeID: episode.id, sceneID: sceneID, hint: value)
-                            },
-                            onTimeChange: { sceneID, value in
-                                store.updateSceneTimeHint(projectID: project.id, episodeID: episode.id, sceneID: sceneID, hint: value)
-                            },
-                            onDelete: { sceneID in
-                                store.deleteScene(projectID: project.id, episodeID: episode.id, sceneID: sceneID)
-                            }
-                        )
+        VStack(alignment: .leading, spacing: 16) {
+            if let episode = selectedEpisode {
+                VStack(alignment: .leading, spacing: 16) {
+                    VStack(alignment: .leading, spacing: 6) {
+                        Text(episode.displayLabel)
+                            .font(.system(.title, weight: .semibold))
+                        Text("更新 \(episode.updatedAt.formatted(date: .abbreviated, time: .shortened))")
+                            .foregroundStyle(.secondary)
                     }
-                    .padding(24)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .background(
-                        RoundedRectangle(cornerRadius: 24, style: .continuous)
-                            .fill(Color(nsColor: .windowBackgroundColor))
+                    SceneEditorList(
+                        scenes: episode.scenes.sorted { $0.order < $1.order },
+                        onTitleChange: { sceneID, value in
+                            store.updateSceneTitle(projectID: project.id, episodeID: episode.id, sceneID: sceneID, title: value)
+                        },
+                        onBodyChange: { sceneID, value in
+                            store.updateSceneBody(projectID: project.id, episodeID: episode.id, sceneID: sceneID, body: value)
+                        },
+                        onLocationChange: { sceneID, value in
+                            store.updateSceneLocationHint(projectID: project.id, episodeID: episode.id, sceneID: sceneID, hint: value)
+                        },
+                        onTimeChange: { sceneID, value in
+                            store.updateSceneTimeHint(projectID: project.id, episodeID: episode.id, sceneID: sceneID, hint: value)
+                        },
+                        onDelete: { sceneID in
+                            store.deleteScene(projectID: project.id, episodeID: episode.id, sceneID: sceneID)
+                        }
                     )
-                    .shadow(color: Color.black.opacity(0.08), radius: 18, y: 10)
-                } else {
-                    EpisodePlaceholderView()
                 }
+                .padding(24)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .background(
+                    RoundedRectangle(cornerRadius: 24, style: .continuous)
+                        .fill(Color(nsColor: .windowBackgroundColor))
+                )
+                .shadow(color: Color.black.opacity(0.08), radius: 18, y: 10)
+            } else {
+                EpisodePlaceholderView()
             }
-            .padding(.horizontal, 24)
-            .padding(.vertical, 18)
         }
+        .padding(.horizontal, 24)
+        .padding(.vertical, 18)
     }
 }
 

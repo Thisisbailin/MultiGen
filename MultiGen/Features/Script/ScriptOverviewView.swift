@@ -81,12 +81,14 @@ struct ScriptOverviewView: View {
                     members: $draftProductionMembers,
                     assignments: $draftProducerAssignments,
                     tasks: $draftProductionTasks,
-                    episodes: project.orderedEpisodes
+                    episodes: project.orderedEpisodes,
+                    isEditing: .constant(false)
                 )
                 ProjectInfoPanel(
                     store: store,
                     project: project,
-                    accentColor: Color(nsColor: .windowBackgroundColor)
+                    accentColor: Color(nsColor: .windowBackgroundColor),
+                    isEditing: .constant(false)
                 )
             }
         } else {
@@ -97,6 +99,80 @@ struct ScriptOverviewView: View {
                 onCreate: onCreateProject
             )
         }
+    }
+}
+
+struct ScriptProjectDetailPanel: View {
+    @ObservedObject var store: ScriptStore
+    let project: ScriptProject
+    let accentColor: Color
+    @Binding var isEditing: Bool
+
+    @State private var draftProductionMembers: [ProductionMember]
+    @State private var draftProducerAssignments: [UUID: UUID?]
+    @State private var draftProductionTasks: [ProductionTask]
+
+    init(
+        store: ScriptStore,
+        project: ScriptProject,
+        accentColor: Color = Color(nsColor: .windowBackgroundColor),
+        isEditing: Binding<Bool>
+    ) {
+        self.store = store
+        self.project = project
+        self.accentColor = accentColor
+        _isEditing = isEditing
+        _draftProductionMembers = State(initialValue: project.productionMembers)
+        _draftProducerAssignments = State(initialValue: Dictionary(uniqueKeysWithValues: project.episodes.map { ($0.id, $0.producerID) }))
+        _draftProductionTasks = State(initialValue: project.productionTasks)
+    }
+
+    var body: some View {
+        VStack(spacing: 16) {
+            ProductionSummaryRow(
+                members: $draftProductionMembers,
+                assignments: $draftProducerAssignments,
+                tasks: $draftProductionTasks,
+                episodes: project.orderedEpisodes,
+                isEditing: $isEditing
+            )
+            ProjectInfoPanel(
+                store: store,
+                project: project,
+                accentColor: accentColor,
+                isEditing: $isEditing
+            )
+        }
+        .onChange(of: project.id) { _, _ in syncDrafts() }
+        .onChange(of: project.updatedAt) { _, _ in syncDrafts() }
+        .onChange(of: draftProductionMembers) { _, _ in persistDrafts() }
+        .onChange(of: draftProducerAssignments) { _, _ in persistDrafts() }
+        .onChange(of: draftProductionTasks) { _, _ in persistDrafts() }
+    }
+
+    private func syncDrafts() {
+        draftProductionMembers = project.productionMembers
+        draftProducerAssignments = Dictionary(uniqueKeysWithValues: project.episodes.map { ($0.id, $0.producerID) })
+        draftProductionTasks = project.productionTasks
+    }
+
+    private func persistDrafts() {
+        let storedAssignments = Dictionary(uniqueKeysWithValues: project.episodes.map { ($0.id, $0.producerID) })
+        let hasChanges = project.productionMembers != draftProductionMembers
+            || project.productionTasks != draftProductionTasks
+            || assignmentsEqual(storedAssignments, draftProducerAssignments) == false
+        guard hasChanges else { return }
+
+        store.updateProductionMetadata(
+            projectID: project.id,
+            members: draftProductionMembers,
+            tasks: draftProductionTasks,
+            assignments: draftProducerAssignments
+        )
+    }
+
+    private func assignmentsEqual(_ lhs: [UUID: UUID?], _ rhs: [UUID: UUID?]) -> Bool {
+        lhs.count == rhs.count && lhs.allSatisfy { rhs[$0.key] == $0.value }
     }
 }
 
@@ -258,7 +334,7 @@ struct ProjectInfoPanel: View {
     let project: ScriptProject
     let accentColor: Color
 
-    @State private var isEditing = false
+    @Binding private var isEditing: Bool
     @State private var activePanel: PanelPage = .overview
     @State private var draftSynopsis: String = ""
     @State private var draftNotes: String = ""
@@ -273,10 +349,11 @@ struct ProjectInfoPanel: View {
     @State private var draftProductionTasks: [ProductionTask] = []
     @State private var newMemberName: String = ""
 
-    init(store: ScriptStore, project: ScriptProject, accentColor: Color) {
+    init(store: ScriptStore, project: ScriptProject, accentColor: Color, isEditing: Binding<Bool>) {
         self.store = store
         self.project = project
         self.accentColor = accentColor
+        _isEditing = isEditing
         _draftSynopsis = State(initialValue: project.synopsis)
         _draftNotes = State(initialValue: project.notes)
         _draftTags = State(initialValue: project.tags)
@@ -304,6 +381,13 @@ struct ProjectInfoPanel: View {
         .onChange(of: project.id) { _, _ in
             syncDrafts()
         }
+        .onChange(of: isEditing) { _, newValue in
+            if newValue {
+                syncDrafts()
+            } else {
+                persistDraft()
+            }
+        }
     }
 
     private func cardContainer<Content: View>(@ViewBuilder content: () -> Content) -> some View {
@@ -322,16 +406,6 @@ struct ProjectInfoPanel: View {
             Text(activePanel.title)
                 .font(.headline)
             Spacer()
-            Button {
-                if isEditing { persistDraft() } else { syncDrafts() }
-                withAnimation(.spring()) { isEditing.toggle() }
-            } label: {
-                Image(systemName: isEditing ? "checkmark.circle.fill" : "pencil.circle")
-                    .font(.title3)
-                    .foregroundStyle(isEditing ? Color.accentColor : Color.secondary)
-            }
-            .buttonStyle(.borderless)
-
             Button {
                 withAnimation(.easeInOut(duration: 0.2)) {
                     activePanel = activePanel.next()

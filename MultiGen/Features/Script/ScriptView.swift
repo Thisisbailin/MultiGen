@@ -16,9 +16,10 @@ struct ScriptView: View {
     @EnvironmentObject private var storyboardStore: StoryboardStore
     @EnvironmentObject private var navigationStore: NavigationStore
 
-    @State private var highlightedProjectID: UUID?
     @State private var selectedProjectID: UUID?
     @State private var selectedEpisodeID: UUID?
+    @State private var isEpisodeView = false
+    @State private var isOverviewEditing = false
 
     @State private var projectPendingDeletion: ScriptProject?
     @State private var episodePendingDeletion: (projectID: UUID, episode: ScriptEpisode)?
@@ -65,11 +66,6 @@ struct ScriptView: View {
             .sorted { $0.updatedAt > $1.updatedAt }
     }
 
-    private var highlightedProject: ScriptProject? {
-        guard let id = highlightedProjectID else { return projects.first }
-        return projects.first(where: { $0.id == id }) ?? projects.first
-    }
-
     private var selectedProject: ScriptProject? {
         guard let id = selectedProjectID else { return nil }
         return projects.first(where: { $0.id == id })
@@ -89,25 +85,15 @@ struct ScriptView: View {
     }
 
     private var animatedContent: some View {
-        contentView
-        .animation(.easeInOut(duration: 0.2), value: selectedProjectID)
-        .onAppear {
-            if selectedProjectID == nil, selectedEpisodeID == nil,
-               let savedEpisode = navigationStore.currentScriptEpisodeID,
-               let project = projects.first(where: { $0.episodes.contains(where: { $0.id == savedEpisode }) }) {
-                selectedProjectID = project.id
-                selectedEpisodeID = savedEpisode
-            }
-
-            navigationStore.currentScriptProjectID = selectedProjectID
-            navigationStore.currentScriptEpisodeID = selectedEpisodeID
-            if highlightedProjectID == nil {
-                highlightedProjectID = navigationStore.currentScriptProjectID ?? projects.first?.id
-            }
-            if let current = selectedProjectID {
-                _ = store.ensureScript(projectID: current, type: .standalone)
-            }
+        ScrollView {
+            contentView
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(.horizontal, 20)
+                .padding(.vertical, 12)
         }
+        .scrollIndicators(.automatic)
+        .animation(.easeInOut(duration: 0.2), value: selectedProjectID)
+        .onAppear(perform: hydrateSelectionFromNavigation)
         .onChange(of: selectedEpisodeID) { _, newValue in
             navigationStore.currentScriptEpisodeID = newValue
         }
@@ -119,21 +105,25 @@ struct ScriptView: View {
             if newValue == nil {
                 navigationStore.currentScriptEpisodeID = nil
             }
-        }
-        .onChange(of: highlightedProjectID) { _, newValue in
-            if newValue == nil {
-                highlightedProjectID = projects.first?.id
-            }
+            isEpisodeView = false
+            isOverviewEditing = false
         }
         .onChange(of: projects) { _, updatedProjects in
             guard let currentProjectID = selectedProjectID else {
-                highlightedProjectID = highlightedProjectID ?? updatedProjects.first?.id
+                if let first = updatedProjects.first?.id {
+                    selectedProjectID = first
+                    selectedEpisodeID = updatedProjects.first?.orderedEpisodes.first?.id
+                }
+                isEpisodeView = false
+                isOverviewEditing = false
                 return
             }
 
             if updatedProjects.contains(where: { $0.id == currentProjectID }) == false {
                 selectedProjectID = nil
                 selectedEpisodeID = nil
+                isEpisodeView = false
+                isOverviewEditing = false
             } else if let project = updatedProjects.first(where: { $0.id == currentProjectID }) {
                 if let currentEpisodeID = selectedEpisodeID,
                    project.episodes.contains(where: { $0.id == currentEpisodeID }) == false {
@@ -142,12 +132,17 @@ struct ScriptView: View {
                     selectedEpisodeID = project.orderedEpisodes.first?.id
                 }
             }
-
-            if let highlight = highlightedProjectID,
-               updatedProjects.contains(where: { $0.id == highlight }) == false {
-                highlightedProjectID = updatedProjects.first?.id
-            } else if highlightedProjectID == nil {
-                highlightedProjectID = updatedProjects.first?.id
+        }
+        .onChange(of: navigationStore.currentScriptProjectID) { _, newValue in
+            guard let newValue else { return }
+            if selectedProjectID != newValue {
+                selectedProjectID = newValue
+                selectedEpisodeID = store.project(id: newValue)?.orderedEpisodes.first?.id
+            }
+        }
+        .onChange(of: isEpisodeView) { _, newValue in
+            if newValue {
+                isOverviewEditing = false
             }
         }
     }
@@ -272,17 +267,32 @@ struct ScriptView: View {
     private var toolbarWrappedView: some View {
         alertWrappedView
         .toolbar {
-            ToolbarItemGroup {
-                let project = selectedProject ?? highlightedProject
-                if let project {
+            if isEpisodeView {
+                ToolbarItem(placement: .navigation) {
                     Button {
-                        selectedProjectID = nil
-                        selectedEpisodeID = nil
+                        isEpisodeView = false
                     } label: {
-                        Label("返回项目库", systemImage: "chevron.backward")
+                        Label("返回概览", systemImage: "chevron.backward")
+                    }
+                }
+            }
+            ToolbarItemGroup {
+                if let project = selectedProject {
+                    if isEpisodeView == false {
+                        Button {
+                            withAnimation(.spring()) {
+                                if isOverviewEditing {
+                                    isOverviewEditing = false
+                                } else {
+                                    isOverviewEditing = true
+                                }
+                            }
+                        } label: {
+                            Image(systemName: isOverviewEditing ? "checkmark.circle.fill" : "pencil.circle")
+                        }
                     }
 
-                    if selectedEpisode != nil {
+                    if isEpisodeView, selectedEpisode != nil {
                         Button {
                             newSceneName = ""
                             newSceneLocation = ""
@@ -293,73 +303,77 @@ struct ScriptView: View {
                         }
                     }
 
-                    Menu {
-                        if project.orderedEpisodes.isEmpty {
-                            Text("暂无剧集")
-                        } else {
-                            ForEach(project.orderedEpisodes) { episode in
-                                Button(episode.displayLabel) {
-                                    selectedEpisodeID = episode.id
+                    if isEpisodeView {
+                        Menu {
+                            if project.orderedEpisodes.isEmpty {
+                                Text("暂无剧集")
+                            } else {
+                                ForEach(project.orderedEpisodes) { episode in
+                                    Button(episode.displayLabel) {
+                                        selectedEpisodeID = episode.id
+                                    }
                                 }
                             }
-                        }
-                    } label: {
-                        Label(selectedEpisode?.displayLabel ?? "选择剧集", systemImage: "list.bullet.rectangle")
-                    }
-
-                    Button {
-                        addEpisode(to: project)
-                    } label: {
-                        Label("新增剧集", systemImage: "plus")
-                    }
-                    .disabled(selectedEpisode == nil)
-
-                    Button {
-                        startImportScriptIntoSelectedProject()
-                    } label: {
-                        Label("导入剧本", systemImage: "tray.and.arrow.down")
-                    }
-
-                    if let batchProject = selectedProject ?? highlightedProject {
-                        Button {
-                            highlightedProjectID = batchProject.id
-                            batchFlow = BatchStoryboardFlowStore(
-                                project: batchProject,
-                                promptLibraryStore: promptLibraryStore,
-                                actionCenter: actionCenter,
-                                storyboardStore: storyboardStore
-                            )
-                            showingBatchStoryboardWizard = true
                         } label: {
-                            Label("批量转写分镜", systemImage: "film.stack")
+                            Label(selectedEpisode?.displayLabel ?? "选择剧集", systemImage: "list.bullet.rectangle")
+                        }
+
+                        Button {
+                            addEpisode(to: project)
+                        } label: {
+                            Label("新增剧集", systemImage: "plus")
+                        }
+                        .disabled(selectedEpisode == nil)
+
+                        Button {
+                            startImportScriptIntoSelectedProject()
+                        } label: {
+                            Label("导入剧本", systemImage: "tray.and.arrow.down")
+                        }
+
+                        if let batchProject = selectedProject {
+                            Button {
+                                batchFlow = BatchStoryboardFlowStore(
+                                    project: batchProject,
+                                    promptLibraryStore: promptLibraryStore,
+                                    actionCenter: actionCenter,
+                                    storyboardStore: storyboardStore
+                                )
+                                showingBatchStoryboardWizard = true
+                            } label: {
+                                Label("批量转写分镜", systemImage: "film.stack")
+                            }
                         }
                     }
 
-                    Menu {
-                        Button("导出 Markdown") {
-                            exportEpisode(project: project, episode: selectedEpisode, as: .markdown)
-                        }
-                        .disabled(selectedEpisode == nil)
-                        Button("导出 PDF") {
-                            exportEpisode(project: project, episode: selectedEpisode, as: .pdf)
-                        }
-                        .disabled(selectedEpisode == nil)
+                    if isEpisodeView {
                         Divider()
-                        Button("导出剧本（Word）") {
-                            exportProjectAsWord(project)
+                        Menu {
+                            Button("导出 Markdown") {
+                                exportEpisode(project: project, episode: selectedEpisode, as: .markdown)
+                            }
+                            .disabled(selectedEpisode == nil)
+                            Button("导出 PDF") {
+                                exportEpisode(project: project, episode: selectedEpisode, as: .pdf)
+                            }
+                            .disabled(selectedEpisode == nil)
+                            Divider()
+                            Button("导出剧本（Word）") {
+                                exportProjectAsWord(project)
+                            }
+                        } label: {
+                            Label("导出", systemImage: "square.and.arrow.down")
                         }
-                    } label: {
-                        Label("导出", systemImage: "square.and.arrow.down")
-                    }
 
-                    Button(role: .destructive) {
-                        if let episode = selectedEpisode {
-                            episodePendingDeletion = (project.id, episode)
+                        Button(role: .destructive) {
+                            if let episode = selectedEpisode {
+                                episodePendingDeletion = (project.id, episode)
+                            }
+                        } label: {
+                            Label("删除剧集", systemImage: "trash")
                         }
-                    } label: {
-                        Label("删除剧集", systemImage: "trash")
+                        .disabled(selectedEpisode == nil)
                     }
-                    .disabled(selectedEpisode == nil)
                 } else {
                     Button {
                         navigationStore.selection = .writing
@@ -369,30 +383,44 @@ struct ScriptView: View {
                 }
             }
         }
-        .toolbarBackground(.hidden, for: .windowToolbar)
-        .toolbarBackground(.hidden, for: .automatic)
     }
 
     @ViewBuilder
     private var contentView: some View {
         if let project = selectedProject {
-            ScriptEpisodeView(
-                store: store,
-                project: project,
-                selectedEpisode: selectedEpisode
-            )
+            VStack(alignment: .leading, spacing: 14) {
+                if isEpisodeView == false {
+                    ResumeHeader(
+                        project: project,
+                        episode: selectedEpisode,
+                        onResume: {
+                            if selectedEpisodeID == nil {
+                                selectedEpisodeID = project.orderedEpisodes.first?.id
+                            }
+                            isOverviewEditing = false
+                            isEpisodeView = true
+                        }
+                    )
+                    ScriptProjectDetailPanel(
+                        store: store,
+                        project: project,
+                        accentColor: Color(nsColor: .windowBackgroundColor),
+                        isEditing: $isOverviewEditing
+                    )
+                } else {
+                    ScriptEpisodeView(
+                        store: store,
+                        project: project,
+                        selectedEpisode: selectedEpisode
+                    )
+                }
+            }
         } else {
-            ScriptOverviewView(
-                store: store,
-                projects: projects,
-                highlightedProject: highlightedProject,
-                highlightedProjectID: $highlightedProjectID,
-                onOpenProject: { project in
-                    selectedProjectID = project.id
-                    selectedEpisodeID = project.orderedEpisodes.first?.id
-                },
-                onCreateProject: { navigationStore.selection = .writing },
-                onImportProject: { navigationStore.selection = .writing }
+            ProjectSelectionPlaceholder(
+                title: "暂无选中项目",
+                description: "请在主页选择项目容器，或前往写作模块创建新项目。",
+                buttonTitle: "前往主页",
+                onCreate: { navigationStore.selection = .home }
             )
         }
     }
@@ -511,6 +539,30 @@ struct ScriptView: View {
         return hasEpisodes || script.synopsis.isEmpty == false || script.mainCharacters.isEmpty == false || script.keyScenes.isEmpty == false
     }
 
+    private func hydrateSelectionFromNavigation() {
+        if let savedProject = navigationStore.currentScriptProjectID,
+           projects.contains(where: { $0.id == savedProject }) {
+            selectedProjectID = savedProject
+        } else {
+            selectedProjectID = projects.first?.id
+        }
+
+        if let savedEpisode = navigationStore.currentScriptEpisodeID,
+           let project = projects.first(where: { $0.episodes.contains(where: { $0.id == savedEpisode }) }) {
+            selectedProjectID = project.id
+            selectedEpisodeID = savedEpisode
+        } else if selectedEpisodeID == nil, let project = selectedProject {
+            selectedEpisodeID = project.orderedEpisodes.first?.id
+        }
+
+        if let current = selectedProjectID {
+            navigationStore.currentScriptProjectID = current
+            if navigationStore.currentScriptEpisodeID == nil {
+                navigationStore.currentScriptEpisodeID = store.project(id: current)?.orderedEpisodes.first?.id
+            }
+        }
+    }
+
     private func applyImportedScript(_ payload: ScriptImportPayload, projectID: UUID? = nil) async {
         let targetID = projectID ?? selectedProjectID
         guard let targetProjectID = targetID else { return }
@@ -591,7 +643,6 @@ struct ScriptView: View {
 
         await MainActor.run {
             pendingImportPayload = nil
-            highlightedProjectID = targetProjectID
             selectedProjectID = targetProjectID
             selectedEpisodeID = store.project(id: targetProjectID)?.orderedEpisodes.first?.id
             importInProgress = false
@@ -599,7 +650,7 @@ struct ScriptView: View {
         }
     }
 
-private func addScene(name: String, location: String, time: String) {
+    private func addScene(name: String, location: String, time: String) {
         guard let projectID = selectedProjectID, let episodeID = selectedEpisodeID else { return }
         _ = store.addScene(
             to: projectID,
@@ -616,7 +667,7 @@ private func addScene(name: String, location: String, time: String) {
 
     private func ensureBatchFlow() -> BatchStoryboardFlowStore? {
         if let flow = batchFlow { return flow }
-        guard let project = selectedProject ?? highlightedProject else { return nil }
+        guard let project = selectedProject else { return nil }
         let flow = BatchStoryboardFlowStore(
             project: project,
             promptLibraryStore: promptLibraryStore,
@@ -625,6 +676,48 @@ private func addScene(name: String, location: String, time: String) {
         )
         batchFlow = flow
         return flow
+    }
+}
+
+private struct ResumeHeader: View {
+    let project: ScriptProject
+    let episode: ScriptEpisode?
+    let onResume: () -> Void
+
+    var body: some View {
+        HStack(spacing: 12) {
+            VStack(alignment: .leading, spacing: 4) {
+                Text("继续上次工作")
+                    .font(.headline)
+                Text("\(episodeLabel()) · 更新 \(updatedText())")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+            Spacer()
+            Button {
+                onResume()
+            } label: {
+                HStack(spacing: 6) {
+                    Text("继续")
+                    Image(systemName: "arrow.right.circle.fill")
+                }
+            }
+            .buttonStyle(.borderedProminent)
+        }
+        .padding(12)
+        .background(
+            RoundedRectangle(cornerRadius: 14, style: .continuous)
+                .fill(Color(nsColor: .textBackgroundColor))
+        )
+    }
+
+    private func episodeLabel() -> String {
+        episode?.displayLabel ?? "整片"
+    }
+
+    private func updatedText() -> String {
+        let date = episode?.updatedAt ?? project.updatedAt
+        return date.formatted(date: .abbreviated, time: .shortened)
     }
 }
 

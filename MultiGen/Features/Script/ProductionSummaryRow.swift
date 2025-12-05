@@ -5,10 +5,10 @@ struct ProductionSummaryRow: View {
     @Binding var assignments: [UUID: UUID?] // episodeID -> memberID
     @Binding var tasks: [ProductionTask]
     let episodes: [ScriptEpisode]
+    @Binding var isEditing: Bool
 
     @State private var completedEpisodes: Set<UUID> = []
     @State private var newMemberName: String = ""
-    @State private var isEditing = false
 
     @State private var taskName: String = ""
     @State private var taskStart: Date = Date()
@@ -17,9 +17,9 @@ struct ProductionSummaryRow: View {
     var body: some View {
         HStack(spacing: 12) {
             productionCard
-                .frame(maxWidth: .infinity)
+                .frame(maxWidth: .infinity, minHeight: 220, maxHeight: 260)
             timelineCard
-                .frame(maxWidth: .infinity)
+                .frame(maxWidth: .infinity, minHeight: 220, maxHeight: 260)
         }
     }
 
@@ -29,78 +29,92 @@ struct ProductionSummaryRow: View {
                 Text("制作人员")
                     .font(.headline)
                 Spacer()
-                Button {
-                    withAnimation { isEditing.toggle() }
-                } label: {
-                    Image(systemName: isEditing ? "checkmark.circle.fill" : "pencil.circle")
-                }
-                .buttonStyle(.plain)
-            }
-
-            HStack(spacing: 8) {
-                ForEach(members) { member in
-                    AvatarCircle(initials: initials(for: member.name), color: color(from: member.colorHex))
-                        .overlay(Circle().stroke(Color.white.opacity(0.6), lineWidth: 1))
-                        .help(member.name)
-                }
-                if members.isEmpty {
-                    Text("暂未添加").foregroundStyle(.secondary)
+                if isEditing == false {
+                    Text("只读")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
                 }
             }
 
-            if isEditing {
-                HStack(spacing: 8) {
-                    TextField("新增人员姓名", text: $newMemberName)
-                        .textFieldStyle(.roundedBorder)
-                        .frame(width: 160)
-                        .onSubmit(addMember)
-                    Button("添加") { addMember() }
-                        .buttonStyle(.bordered)
-                }
-            }
+            ScrollView(.vertical, showsIndicators: false) {
+                VStack(alignment: .leading, spacing: 10) {
+                    HStack(spacing: 8) {
+                        ForEach(members) { member in
+                            RoundedRectangle(cornerRadius: 8, style: .continuous)
+                                .fill(color(from: member.colorHex).opacity(0.85))
+                                .frame(width: 34, height: 34)
+                                .overlay(
+                                    Text(initials(for: member.name))
+                                        .font(.caption.weight(.bold))
+                                        .foregroundStyle(.white)
+                                )
+                                .overlay(
+                                    RoundedRectangle(cornerRadius: 8, style: .continuous)
+                                        .stroke(Color.white.opacity(0.6), lineWidth: 1)
+                                )
+                                .help(member.name)
+                        }
+                        if members.isEmpty {
+                            Text("暂未添加").foregroundStyle(.secondary)
+                        }
+                    }
 
-            if episodes.isEmpty == false {
-                LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: 6), count: 8), spacing: 6) {
-                    ForEach(episodes) { episode in
-                        let assignedID = assignments[episode.id] ?? episode.producerID
-                        let assigned = members.first(where: { $0.id == assignedID })
-                        let tint = assigned.map { color(from: $0.colorHex) } ?? Color(nsColor: .underPageBackgroundColor)
-                        let isDone = completedEpisodes.contains(episode.id)
-                        Circle()
-                            .fill(isDone ? tint.opacity(0.8) : tint.opacity(0.35))
-                            .frame(width: 18, height: 18)
-                            .overlay(
-                                Text("\(episode.episodeNumber)")
-                                    .font(.caption2.weight(.semibold))
-                                    .foregroundStyle(.primary)
-                            )
-                            .overlay(
-                                Circle().stroke(tint.opacity(isDone ? 1.0 : 0.6), lineWidth: 1)
-                            )
-                            .contentShape(Rectangle())
-                            .contextMenu {
-                                if isEditing {
-                                    Button(isDone ? "标记未完成" : "标记完成") { toggleDone(episode.id) }
-                                    Button("未分配") { assignments[episode.id] = nil }
-                                    ForEach(members) { member in
-                                        Button(member.name) { assignments[episode.id] = member.id }
+                    if isEditing {
+                        HStack(spacing: 8) {
+                            TextField("新增人员姓名", text: $newMemberName)
+                                .textFieldStyle(.roundedBorder)
+                                .frame(width: 160)
+                                .onSubmit(addMember)
+                            Button("添加") { addMember() }
+                                .buttonStyle(.bordered)
+                        }
+                    }
+
+                    if episodes.isEmpty == false {
+                        LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: 6), count: 6), spacing: 8) {
+                            ForEach(episodes) { episode in
+                                let assignedID = assignments[episode.id] ?? episode.producerID
+                                let assigned = members.first(where: { $0.id == assignedID })
+                                let tint = assigned.map { color(from: $0.colorHex) } ?? Color(nsColor: .underPageBackgroundColor)
+                                let isDone = completedEpisodes.contains(episode.id)
+                                RoundedRectangle(cornerRadius: 6, style: .continuous)
+                                    .fill(isDone ? tint.opacity(0.85) : tint.opacity(0.35))
+                                    .frame(height: 32)
+                                    .overlay(
+                                        Text("第\(episode.episodeNumber)集")
+                                            .font(.caption.weight(.semibold))
+                                            .foregroundStyle(.primary)
+                                    )
+                                    .overlay(
+                                        RoundedRectangle(cornerRadius: 6, style: .continuous)
+                                            .stroke(tint.opacity(isDone ? 1.0 : 0.6), lineWidth: 1)
+                                    )
+                                    .contentShape(Rectangle())
+                                    .contextMenu {
+                                        if isEditing {
+                                            Button(isDone ? "标记未完成" : "标记完成") { toggleDone(episode.id) }
+                                            Button("未分配") { assignments[episode.id] = nil }
+                                            ForEach(members) { member in
+                                                Button(member.name) { assignments[episode.id] = member.id }
+                                            }
+                                        }
                                     }
-                                }
-                            }
-                            .onTapGesture {
-                                guard isEditing else { return }
-                                toggleDone(episode.id)
-                                if members.isEmpty == false {
-                                    let list = members
-                                    if let current = assignments[episode.id],
-                                       let idx = list.firstIndex(where: { $0.id == current }) {
-                                        let next = list.index(after: idx)
-                                        assignments[episode.id] = next < list.endIndex ? list[next].id : nil
-                                    } else {
-                                        assignments[episode.id] = list.first?.id
+                                    .onTapGesture {
+                                        guard isEditing else { return }
+                                        toggleDone(episode.id)
+                                        if members.isEmpty == false {
+                                            let list = members
+                                            if let current = assignments[episode.id],
+                                               let idx = list.firstIndex(where: { $0.id == current }) {
+                                                let next = list.index(after: idx)
+                                                assignments[episode.id] = next < list.endIndex ? list[next].id : nil
+                                            } else {
+                                                assignments[episode.id] = list.first?.id
+                                            }
+                                        }
                                     }
-                                }
                             }
+                        }
                     }
                 }
             }
@@ -116,12 +130,11 @@ struct ProductionSummaryRow: View {
                 Text("制作周期")
                     .font(.headline)
                 Spacer()
-                Button {
-                    withAnimation { isEditing.toggle() }
-                } label: {
-                    Image(systemName: isEditing ? "checkmark.circle.fill" : "pencil.circle")
+                if isEditing == false {
+                    Text("只读")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
                 }
-                .buttonStyle(.plain)
             }
 
             if isEditing {
@@ -137,41 +150,48 @@ struct ProductionSummaryRow: View {
                 }
             }
 
-            if tasks.isEmpty {
-                Text("暂无任务").foregroundStyle(.secondary)
-            } else {
-                VStack(spacing: 8) {
-                    ForEach(tasks) { task in
-                        let duration = max(1, Calendar.current.dateComponents([.day], from: task.startDate, to: task.endDate).day ?? 0)
-                        let tint = Color.accentColor.opacity(0.7)
-                        HStack {
-                            Circle().fill(tint).frame(width: 10, height: 10)
-                            Text(task.name.isEmpty ? "未命名任务" : task.name)
-                                .font(.subheadline.weight(.semibold))
-                            Spacer()
-                            Text("\(duration) 天")
-                                .font(.caption)
-                                .foregroundStyle(.secondary)
-                        }
-                        .padding(10)
-                        .background(
-                            RoundedRectangle(cornerRadius: 10, style: .continuous)
-                                .fill(Color(nsColor: .windowBackgroundColor))
-                        )
-                        .overlay(
-                            RoundedRectangle(cornerRadius: 10, style: .continuous)
-                                .stroke(tint.opacity(0.6), lineWidth: 1)
-                        )
-                        .contextMenu {
-                            Button(task.isDone ? "标记进行中" : "标记完成") {
+            ScrollView(.vertical, showsIndicators: false) {
+                if tasks.isEmpty {
+                    Text("暂无任务").foregroundStyle(.secondary)
+                } else {
+                    VStack(spacing: 8) {
+                        ForEach(tasks) { task in
+                            let duration = max(1, Calendar.current.dateComponents([.day], from: task.startDate, to: task.endDate).day ?? 0)
+                            let tint = Color.accentColor.opacity(0.7)
+                            HStack {
+                                RoundedRectangle(cornerRadius: 4, style: .continuous)
+                                    .fill(tint)
+                                    .frame(width: 10, height: 10)
+                                Text(task.name.isEmpty ? "未命名任务" : task.name)
+                                    .font(.subheadline.weight(.semibold))
+                                Spacer()
+                                Text("\(duration) 天")
+                                    .font(.caption)
+                                    .foregroundStyle(.secondary)
+                            }
+                            .padding(10)
+                            .background(
+                                RoundedRectangle(cornerRadius: 10, style: .continuous)
+                                    .fill(Color(nsColor: .windowBackgroundColor))
+                            )
+                            .overlay(
+                                RoundedRectangle(cornerRadius: 10, style: .continuous)
+                                    .stroke(tint.opacity(0.6), lineWidth: 1)
+                            )
+                            .contextMenu {
+                                if isEditing {
+                                    Button(task.isDone ? "标记进行中" : "标记完成") {
+                                        toggleTask(task.id)
+                                    }
+                                    Button("删除", role: .destructive) {
+                                        tasks.removeAll { $0.id == task.id }
+                                    }
+                                }
+                            }
+                            .onTapGesture {
+                                guard isEditing else { return }
                                 toggleTask(task.id)
                             }
-                            Button("删除", role: .destructive) {
-                                tasks.removeAll { $0.id == task.id }
-                            }
-                        }
-                        .onTapGesture {
-                            toggleTask(task.id)
                         }
                     }
                 }
